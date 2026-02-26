@@ -15,9 +15,9 @@ def load_and_prep_data():
     # 1. Connect to Google Sheets securely
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # 2. Read the raw sheet without headers so we can slice the grid manually
+   # 2. Read the raw sheet without headers so we can slice the grid manually
     raw_df = conn.read(
-        spreadsheet="1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
+        spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
         worksheet="PHYSICAL INVENTORY1",
         header=None
     )
