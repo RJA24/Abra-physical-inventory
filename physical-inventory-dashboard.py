@@ -39,10 +39,18 @@ def load_and_prep_data():
     
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
-    # --- NEW: STOCKOUT LOGIC ---
+    # --- FIXED: TRUE STOCKOUT LOGIC ---
     # Define primary vaccines that no RHU should ever run out of
     critical_vaxes = ['BCG', 'bOPV', 'PENTAVALENT', 'MR']
-    stockouts_df = melted[(melted['Vaccine'].isin(critical_vaxes)) & (melted['Qty'] == 0)].copy()
+    
+    # Isolate only critical vaccines
+    crit_df = melted[melted['Vaccine'].isin(critical_vaxes)]
+    
+    # Group by RHU and Vaccine to sum all the different lots together
+    rhu_vax_totals = crit_df.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+    
+    # ONLY flag as a stockout if the TOTAL combined quantity is 0
+    stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
     
     # --- ACTIVE INVENTORY LOGIC ---
     clean_df = melted[melted['Qty'] > 0].copy()
@@ -109,13 +117,13 @@ total_vax = df['Qty'].sum()
 expired_vax = df[df['Status'] == '🚨 EXPIRED']['Qty'].sum()
 critical_vax = df[df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum()
 active_rhus = df['RHU'].nunique()
-total_stockouts = len(stockouts)
+total_stockouts = len(stockouts['RHU'].unique()) # Fixed to show number of RHUs with issues
 
 col1.metric("Total Doses Active", f"{total_vax:,}")
 col2.metric("Locations w/ Stock", f"{active_rhus} / 29")
 col3.metric("🚨 Expired Doses", f"{expired_vax:,}")
 col4.metric("🔴 Critical (<60 Days)", f"{critical_vax:,}")
-col5.metric("⚠️ Zero-Stock Alerts", f"{total_stockouts}")
+col5.metric("⚠️ Zero-Stock RHUs", f"{total_stockouts}")
 
 st.markdown("---")
 
@@ -205,12 +213,12 @@ with tab4:
 with tab5:
     # --- NEW: STOCKOUT WARNINGS ---
     st.subheader("🚨 Zero-Stock Alerts (Primary Vaccines)")
-    st.write("The following municipalities are currently reporting **0 doses** of highly critical routine vaccines (BCG, bOPV, PENTAVALENT, MR).")
+    st.write("The following municipalities are currently reporting **0 TOTAL doses** of highly critical routine vaccines (BCG, bOPV, PENTAVALENT, MR).")
     
     if not stockouts.empty:
         # Group by RHU to make it easier to read
         stockout_summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
-        stockout_summary.rename(columns={'Vaccine': 'Missing Vaccines (0 Stock)'}, inplace=True)
+        stockout_summary.rename(columns={'Vaccine': 'Missing Vaccines (0 Total Stock)'}, inplace=True)
         st.dataframe(stockout_summary, use_container_width=True, hide_index=True)
     else:
         st.success("✅ Excellent! All RHUs currently have at least 1 dose of all primary vaccines.")
