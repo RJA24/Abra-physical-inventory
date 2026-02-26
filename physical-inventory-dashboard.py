@@ -18,7 +18,7 @@ def load_and_prep_data():
     # 2. Read the raw sheet without headers so we can slice the grid manually
     raw_df = conn.read(
         spreadsheet="1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
-        worksheet="PHYSICAL INVENTORY1",
+        worksheet="PHYSICAL_INVENTORY1",
         header=None
     )
     
