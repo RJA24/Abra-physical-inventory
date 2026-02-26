@@ -8,7 +8,8 @@ import calendar
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- SECURE DATA CONNECTION & PARSING ---
-@st.cache_data(ttl=600) 
+# Caches data for 60 seconds to protect API limits
+@st.cache_data(ttl=60) 
 def load_and_prep_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     
@@ -19,42 +20,30 @@ def load_and_prep_data():
     )
     
     # EXACT COORDINATES FROM DEBUG SCRIPT
-    # Vaccines are on Row index 0, starting from Column index 2
-    # We use ffill() because merged cells leave blanks to the right
     vaccines = pd.Series(raw_df.iloc[0, 2:]).ffill().values 
-    
-    # Lots are on Row index 2, starting from Column index 2
     lots = raw_df.iloc[2, 2:].values
-    
-    # Expiries are on Row index 3, starting from Column index 2
     expiries = raw_df.iloc[3, 2:].values
     
-    # The RHU data grid starts at Row index 4
-    # The RHU names are in Column index 1, quantities are Column index 2 onwards
     grid_df = raw_df.iloc[4:, 1:].copy()
     
-    # Rename columns to ['RHU', 0, 1, 2, 3...]
     col_indices = list(range(len(vaccines)))
     grid_df.columns = ['RHU'] + col_indices
     
-    # Drop empty rows at the bottom
     grid_df = grid_df.dropna(subset=['RHU'])
-    # Filter out the 'TOTAL:' row at the bottom of the sheet
     grid_df = grid_df[~grid_df['RHU'].astype(str).str.contains('TOTAL', case=False, na=False)]
     
     # MELT THE MATRIX
     melted = grid_df.melt(id_vars=['RHU'], var_name='ColIndex', value_name='Qty')
     
-    # Map the metadata back to the flattened list using the column index
+    # Map the metadata
     melted['Vaccine'] = [vaccines[i] for i in melted['ColIndex']]
     melted['Lot'] = [str(lots[i]) for i in melted['ColIndex']]
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     
-    # Clean up the data
+    # Clean up the data & REMOVE DECIMALS
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0)
-    
-    # Filter out rows with zero stock 
     clean_df = melted[melted['Qty'] > 0].copy()
+    clean_df['Qty'] = clean_df['Qty'].astype(int) # Forces whole numbers
     
     # BULLETPROOF DATE PARSING
     def parse_expiry(val):
@@ -75,7 +64,6 @@ def load_and_prep_data():
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce')
     
-    # Status calculation
     today = pd.Timestamp.now().normalize()
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
     
@@ -101,7 +89,7 @@ df = load_and_prep_data()
 st.markdown("""
     <style>
     .main-header { color: #4cc9f0; font-weight: bold; margin-bottom: 0px; }
-    .sub-header { color: #a9d6e5; margin-top: 0px; margin-bottom: 30px; font-style: italic; }
+    .sub-header { color: #a9d6e5; margin-top: 0px; margin-bottom: 15px; font-style: italic; }
     div[data-testid="stMetricValue"] { color: #BC13FE !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -109,6 +97,11 @@ st.markdown("""
 # --- DASHBOARD HEADER ---
 st.markdown('<h1 class="main-header">🏥 PHO Abra: Vaccine Inventory Control</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Live logistics tracking across all 27 Municipalities & Provincial Hubs</p>', unsafe_allow_html=True)
+
+# THE MANUAL REFRESH BUTTON
+if st.button("🔄 Sync Live Data from Google Sheets"):
+    st.cache_data.clear()
+    st.rerun()
 
 # --- TOP METRICS ---
 col1, col2, col3, col4 = st.columns(4)
