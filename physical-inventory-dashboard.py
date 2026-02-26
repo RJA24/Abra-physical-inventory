@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 import calendar
-from datetime import datetime
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
@@ -15,7 +14,7 @@ def load_and_prep_data():
     # 1. Connect to Google Sheets securely
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-   # 2. Read the raw sheet without headers so we can slice the grid manually
+    # 2. Read the raw sheet without headers so we can slice the grid manually
     raw_df = conn.read(
         spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
         worksheet="PHYSICAL INVENTORY1",
@@ -35,7 +34,7 @@ def load_and_prep_data():
     col_indices = list(range(len(vaccines)))
     grid_df.columns = ['RHU'] + col_indices
     
-    # 5. MELT THE MATRIX (Option A)
+    # 5. MELT THE MATRIX
     melted = grid_df.melt(id_vars=['RHU'], var_name='ColIndex', value_name='Qty')
     
     # Map the metadata back to the flattened list
@@ -50,20 +49,31 @@ def load_and_prep_data():
     # Filter out rows with zero stock so the dashboard is clean and fast
     clean_df = melted[melted['Qty'] > 0].copy()
     
-    # Parse Dates mathematically
-    def parse_expiry(expiry_str):
+    # BULLETPROOF DATE PARSING
+    def parse_expiry(val):
         try:
-            month, year = map(int, expiry_str.split('/'))
-            year += 2000 # Convert '26' to '2026'
-            last_day = calendar.monthrange(year, month)[1]
-            return pd.to_datetime(f"{year}-{month:02d}-{last_day}")
+            val_str = str(val).strip()
+            if '/' in val_str:
+                parts = val_str.split('/')
+                # If format is strictly MM/YY (e.g., "4/26")
+                if len(parts) == 2:
+                    month, year = int(parts[0]), int(parts[1])
+                    if year < 100:
+                        year += 2000
+                    last_day = calendar.monthrange(year, month)[1]
+                    return pd.to_datetime(f"{year}-{month:02d}-{last_day}")
+            # If Google Sheets already auto-formatted it as a full date string
+            return pd.to_datetime(val)
         except:
             return pd.NaT 
             
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     
+    # CRITICAL FIX: Force pandas to make this a strict datetime column
+    clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce')
+    
     # Calculate Expiry Status based on the real-time date
-    today = pd.to_datetime("today")
+    today = pd.Timestamp.now().normalize()
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
     
     def get_status(days):
@@ -79,7 +89,6 @@ def load_and_prep_data():
             return '🟢 SAFE'
             
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
-    
     return clean_df
 
 # Load the data loudly to reveal the real error
