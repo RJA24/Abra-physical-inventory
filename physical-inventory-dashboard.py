@@ -63,12 +63,13 @@ def load_and_prep_data():
         except: return pd.NaT 
             
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
-    clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce')
+    clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce').dt.tz_localize(None)
 
     # --- LOCKING TO PHILIPPINE STANDARD TIME (UTC+8) ---
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     pst_now = utc_now + datetime.timedelta(hours=8)
-    today = pst_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # tz_localize(None) makes the timestamp "naive" so it can be subtracted from the data
+    today = pd.Timestamp(pst_now).normalize().tz_localize(None)
     
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
     
