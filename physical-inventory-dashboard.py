@@ -96,10 +96,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- DASHBOARD HEADER ---
-st.markdown('<h1 class="main-header">🏥 PHO Abra: Vaccine Inventory Control</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏥 PHO Abra: Physical Vaccine Inventory</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Live logistics tracking across all 27 Municipalities & Provincial Hubs</p>', unsafe_allow_html=True)
 
-if st.button("🔄 Sync Live Data from Google Sheets"):
+if st.button("🔄 Sync Live Data"):
     st.cache_data.clear()
     st.rerun()
 
