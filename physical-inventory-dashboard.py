@@ -82,12 +82,8 @@ def load_and_prep_data():
     
     return clean_df
 
-# Load the data
-try:
-    df = load_and_prep_data()
-except Exception as e:
-    st.error("Connection Error: Please ensure your Streamlit Secrets are configured correctly and the Service Account has access to the Google Sheet.")
-    st.stop()
+# Load the data loudly to reveal the real error
+df = load_and_prep_data()
 
 # --- CSS STYLING ---
 st.markdown("""
