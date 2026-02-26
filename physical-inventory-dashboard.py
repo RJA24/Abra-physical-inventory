@@ -9,7 +9,7 @@ import datetime
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- SECURE DATA CONNECTION & PARSING ---
-@st.cache_data(ttl=300) # Refreshes every 5 minutes
+@st.cache_data(ttl=300) 
 def load_and_prep_data():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
@@ -41,7 +41,7 @@ def load_and_prep_data():
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
-    # Stockout Logic (Summing all lots per vaccine per RHU)
+    # Stockout Logic
     critical_vaxes = ['BCG', 'bOPV', 'PENTAVALENT', 'MR']
     crit_df = melted[melted['Vaccine'].isin(critical_vaxes)]
     rhu_vax_totals = crit_df.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
@@ -64,7 +64,12 @@ def load_and_prep_data():
             
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce')
-    today = pd.Timestamp.now().normalize()
+
+    # --- LOCKING TO PHILIPPINE STANDARD TIME (UTC+8) ---
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    pst_now = utc_now + datetime.timedelta(hours=8)
+    today = pst_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
     
     def get_status(days):
@@ -75,7 +80,7 @@ def load_and_prep_data():
         else: return '🟢 SAFE'
             
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
-    load_time = datetime.datetime.now().strftime("%I:%M %p")
+    load_time = pst_now.strftime("%I:%M %p")
     return clean_df, stockouts_df, load_time
 
 # --- INITIALIZE DATA ---
@@ -85,7 +90,7 @@ df_init, stockouts_init, last_sync = load_and_prep_data()
 with st.sidebar:
     st.title("🏥 Abra PHO")
     st.markdown("**Cold Chain Management System**")
-    st.info(f"🕒 Last Sync: {last_sync}")
+    st.info(f"🕒 Last Sync (PST): {last_sync}")
     
     if st.button("🔄 Force Refresh Now"):
         st.cache_data.clear()
@@ -125,12 +130,12 @@ col1.metric("Total Active Doses", f"{df['Qty'].sum():,}")
 col2.metric("Locations Reported", f"{df['RHU'].nunique()}")
 col3.metric("🚨 Expired", f"{df[df['Status'] == '🚨 EXPIRED']['Qty'].sum():,}")
 col4.metric("🔴 Critical (<60d)", f"{df[df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum():,}")
-col5.metric("⚠️ Stockout Alerts", len(stockouts))
+col5.metric("⚠️ Stockout RHUs", len(stockouts['RHU'].unique()))
 
 st.markdown("---")
 
 # --- TABS ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚠️ Expiry Radar", "🗺️ Distribution", "📋 Raw Data", "🔍 Recall Trace", "🚨 Stockouts"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚠️ Expiry Radar", "🗺️ Distribution", "📋 Raw Data Matrix", "🔍 Recall Trace", "🚨 Stockouts"])
 
 with tab1:
     st.subheader("Action Required: Expiring or Expired Batches")
@@ -167,18 +172,19 @@ with tab3:
 
 with tab4:
     st.subheader("🔍 Product Recall Search")
-    search_lot = st.text_input("Enter Lot Number:")
+    search_lot = st.text_input("Enter Lot Number (e.g., 12854X007B):")
     if search_lot:
         res = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
         if not res.empty:
             st.warning(f"Found {res['Qty'].sum()} doses of Lot {search_lot}")
-            st.dataframe(res[['RHU', 'Vaccine', 'Qty', 'Status']], use_container_width=True)
+            st.dataframe(res[['RHU', 'Vaccine', 'Qty', 'Status']], use_container_width=True, hide_index=True)
         else: st.success("No active doses found for this Lot.")
 
 with tab5:
     st.subheader("🚨 Critical Stockouts")
     if not stockouts.empty:
-        st.error(f"Alert: {len(stockouts)} critical shortages detected.")
+        st.error(f"Alert: {len(stockouts['RHU'].unique())} municipalities are missing primary vaccine types.")
         summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
+        summary.rename(columns={'Vaccine': 'Missing (Total Stock = 0)'}, inplace=True)
         st.dataframe(summary, use_container_width=True, hide_index=True)
     else: st.success("All RHUs have primary vaccine coverage.")
