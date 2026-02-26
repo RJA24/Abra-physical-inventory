@@ -99,7 +99,7 @@ st.markdown('<h1 class="main-header">🏥 PHO Abra: Vaccine Inventory Control</h
 st.markdown('<p class="sub-header">Live logistics tracking across all 27 Municipalities & Provincial Hubs</p>', unsafe_allow_html=True)
 
 # THE MANUAL REFRESH BUTTON
-if st.button("🔄 Sync Live Data from Google Sheets"):
+if st.button("🔄 Sync Live Data"):
     st.cache_data.clear()
     st.rerun()
 
