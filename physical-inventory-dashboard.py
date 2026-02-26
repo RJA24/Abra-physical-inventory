@@ -8,7 +8,6 @@ import calendar
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- SECURE DATA CONNECTION & PARSING ---
-# Caches data for 60 seconds to protect API limits
 @st.cache_data(ttl=60) 
 def load_and_prep_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -19,13 +18,12 @@ def load_and_prep_data():
         header=None
     )
     
-    # EXACT COORDINATES FROM DEBUG SCRIPT
+    # EXACT COORDINATES
     vaccines = pd.Series(raw_df.iloc[0, 2:]).ffill().values 
     lots = raw_df.iloc[2, 2:].values
     expiries = raw_df.iloc[3, 2:].values
     
     grid_df = raw_df.iloc[4:, 1:].copy()
-    
     col_indices = list(range(len(vaccines)))
     grid_df.columns = ['RHU'] + col_indices
     
@@ -35,17 +33,20 @@ def load_and_prep_data():
     # MELT THE MATRIX
     melted = grid_df.melt(id_vars=['RHU'], var_name='ColIndex', value_name='Qty')
     
-    # Map the metadata
     melted['Vaccine'] = [vaccines[i] for i in melted['ColIndex']]
     melted['Lot'] = [str(lots[i]) for i in melted['ColIndex']]
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     
-    # Clean up the data & REMOVE DECIMALS
-    melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0)
-    clean_df = melted[melted['Qty'] > 0].copy()
-    clean_df['Qty'] = clean_df['Qty'].astype(int) # Forces whole numbers
+    melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
-    # BULLETPROOF DATE PARSING
+    # --- NEW: STOCKOUT LOGIC ---
+    # Define primary vaccines that no RHU should ever run out of
+    critical_vaxes = ['BCG', 'bOPV', 'PENTAVALENT', 'MR']
+    stockouts_df = melted[(melted['Vaccine'].isin(critical_vaxes)) & (melted['Qty'] == 0)].copy()
+    
+    # --- ACTIVE INVENTORY LOGIC ---
+    clean_df = melted[melted['Qty'] > 0].copy()
+    
     def parse_expiry(val):
         try:
             val_str = str(val).strip()
@@ -80,10 +81,10 @@ def load_and_prep_data():
             return '🟢 SAFE'
             
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
-    return clean_df
+    return clean_df, stockouts_df
 
 # Load the data
-df = load_and_prep_data()
+df, stockouts = load_and_prep_data()
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -95,30 +96,37 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- DASHBOARD HEADER ---
-st.markdown('<h1 class="main-header">🏥 PHO Abra: Physical Vaccine Inventory</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏥 PHO Abra: Vaccine Inventory Control</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Live logistics tracking across all 27 Municipalities & Provincial Hubs</p>', unsafe_allow_html=True)
 
-# THE MANUAL REFRESH BUTTON
-if st.button("🔄 Sync Live Data"):
+if st.button("🔄 Sync Live Data from Google Sheets"):
     st.cache_data.clear()
     st.rerun()
 
 # --- TOP METRICS ---
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 total_vax = df['Qty'].sum()
 expired_vax = df[df['Status'] == '🚨 EXPIRED']['Qty'].sum()
 critical_vax = df[df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum()
 active_rhus = df['RHU'].nunique()
+total_stockouts = len(stockouts)
 
 col1.metric("Total Doses Active", f"{total_vax:,}")
-col2.metric("Locations with Stock", f"{active_rhus} / 29")
+col2.metric("Locations w/ Stock", f"{active_rhus} / 29")
 col3.metric("🚨 Expired Doses", f"{expired_vax:,}")
-col4.metric("🔴 Critical Stock (<60 Days)", f"{critical_vax:,}")
+col4.metric("🔴 Critical (<60 Days)", f"{critical_vax:,}")
+col5.metric("⚠️ Zero-Stock Alerts", f"{total_stockouts}")
 
 st.markdown("---")
 
 # --- MAIN CONTENT TABS ---
-tab1, tab2, tab3 = st.tabs(["⚠️ Expiry Radar", "🗺️ RHU Distribution", "📋 Raw Data Matrix"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "⚠️ Expiry Radar", 
+    "🗺️ RHU Distribution", 
+    "📋 Raw Data Matrix", 
+    "🔍 Recall Trace", 
+    "🚨 Stockouts"
+])
 
 with tab1:
     st.subheader("Action Required: Expiring or Expired Batches")
@@ -135,50 +143,40 @@ with tab1:
         return [''] * len(row)
 
     if not urgent_df.empty:
+        # --- NEW: EXPORT BUTTON ---
+        csv_data = urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']].to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Urgent List (CSV)",
+            data=csv_data,
+            file_name="urgent_vaccine_expiries.csv",
+            mime="text/csv"
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        
         styled_df = urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry Date', 'Days to Expiry', 'Qty', 'Status']].style.apply(highlight_rows, axis=1)
         st.dataframe(
             styled_df,
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "Expiry Date": st.column_config.DateColumn("Exact Expiry", format="MMM DD, YYYY")
-            }
+            column_config={"Expiry Date": st.column_config.DateColumn("Exact Expiry", format="MMM DD, YYYY")}
         )
     else:
         st.success("All inventory is currently marked as Safe!")
 
 with tab2:
     st.subheader("Vaccine Distribution by Municipality")
-    
     c1, c2 = st.columns([2, 1])
     with c1:
         rhu_totals = df.groupby('RHU')['Qty'].sum().reset_index().sort_values(by='Qty', ascending=False)
-        fig_rhu = px.bar(
-            rhu_totals, 
-            x='RHU', 
-            y='Qty', 
-            color='Qty',
-            color_continuous_scale='Purpor',
-            template='plotly_dark',
-            title="Total Doses per Location"
-        )
+        fig_rhu = px.bar(rhu_totals, x='RHU', y='Qty', color='Qty', color_continuous_scale='Purpor', template='plotly_dark', title="Total Doses per Location")
         st.plotly_chart(fig_rhu, use_container_width=True)
-        
     with c2:
         vax_totals = df.groupby('Vaccine')['Qty'].sum().reset_index()
-        fig_vax = px.pie(
-            vax_totals, 
-            names='Vaccine', 
-            values='Qty', 
-            hole=0.4,
-            template='plotly_dark',
-            title="Overall Vaccine Composition"
-        )
+        fig_vax = px.pie(vax_totals, names='Vaccine', values='Qty', hole=0.4, template='plotly_dark', title="Overall Vaccine Composition")
         st.plotly_chart(fig_vax, use_container_width=True)
 
 with tab3:
     st.subheader("Live Database Query")
-    
     f_col1, f_col2 = st.columns(2)
     with f_col1:
         sel_rhu = st.multiselect("Filter by RHU:", options=sorted(df['RHU'].unique()))
@@ -186,9 +184,33 @@ with tab3:
         sel_vax = st.multiselect("Filter by Vaccine:", options=sorted(df['Vaccine'].unique()))
         
     filtered_raw = df
-    if sel_rhu:
-        filtered_raw = filtered_raw[filtered_raw['RHU'].isin(sel_rhu)]
-    if sel_vax:
-        filtered_raw = filtered_raw[filtered_raw['Vaccine'].isin(sel_vax)]
-        
+    if sel_rhu: filtered_raw = filtered_raw[filtered_raw['RHU'].isin(sel_rhu)]
+    if sel_vax: filtered_raw = filtered_raw[filtered_raw['Vaccine'].isin(sel_vax)]
     st.dataframe(filtered_raw[['RHU', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+
+with tab4:
+    # --- NEW: RECALL TRACE ---
+    st.subheader("🔍 Product Recall & Traceability")
+    st.write("Enter a Lot Number to instantly locate all distributed doses across the province.")
+    
+    search_lot = st.text_input("Search Lot Number (e.g., 12854X007B):")
+    if search_lot:
+        recall_results = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
+        if not recall_results.empty:
+            st.warning(f"⚠️ FOUND: {recall_results['Qty'].sum()} total doses of Lot '{search_lot}' located across {recall_results['RHU'].nunique()} facilities.")
+            st.dataframe(recall_results[['RHU', 'Vaccine', 'Lot', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+        else:
+            st.success(f"✅ CLEAR: No facilities are currently holding active stock of Lot '{search_lot}'.")
+
+with tab5:
+    # --- NEW: STOCKOUT WARNINGS ---
+    st.subheader("🚨 Zero-Stock Alerts (Primary Vaccines)")
+    st.write("The following municipalities are currently reporting **0 doses** of highly critical routine vaccines (BCG, bOPV, PENTAVALENT, MR).")
+    
+    if not stockouts.empty:
+        # Group by RHU to make it easier to read
+        stockout_summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
+        stockout_summary.rename(columns={'Vaccine': 'Missing Vaccines (0 Stock)'}, inplace=True)
+        st.dataframe(stockout_summary, use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ Excellent! All RHUs currently have at least 1 dose of all primary vaccines.")
