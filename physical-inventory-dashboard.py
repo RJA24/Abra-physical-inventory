@@ -59,7 +59,7 @@ def load_and_prep_data():
     grid_df.columns = ['Health Facility'] + col_indices
     grid_df = grid_df.dropna(subset=['Health Facility'])
     
-    # INDESTRUCTIBLE FILTER - Purges Total rows and visual separator junk like "-EXPIRING (6 MONTHS)"
+    # INDESTRUCTIBLE FILTER
     grid_df = grid_df[~grid_df['Health Facility'].astype(str).str.contains('TOTAL|EXPIRING|MONTHS', case=False, na=False)]
     
     # Reshaping Data
@@ -138,10 +138,28 @@ def load_and_prep_data():
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
     load_time = pst_now.strftime("%I:%M %p")
     
-    return clean_df, stockouts_df, history_df, load_time, melted
+    # --- NEW: TYPO CATCHER ENGINE ---
+    anomalies = []
+    
+    # Catch 1: Negative quantities
+    neg_df = melted[melted['Qty'] < 0]
+    for _, row in neg_df.iterrows():
+        anomalies.append(f"**Negative Inventory:** {row['Health Facility']} reported {row['Qty']} vials of {row['Vaccine']}.")
+        
+    # Catch 2: Missing Lot numbers on active stock
+    missing_lot = clean_df[clean_df['Lot'].astype(str).str.strip().isin(['', 'nan', 'None', 'NAN'])]
+    for _, row in missing_lot.iterrows():
+        anomalies.append(f"**Missing Lot Number:** {row['Health Facility']} has {row['Qty']} vials of {row['Vaccine']}, but the Lot Number is blank.")
+        
+    # Catch 3: Unreadable or missing Expiry dates on active stock
+    missing_expiry = clean_df[pd.isna(clean_df['Expiry Date'])]
+    for _, row in missing_expiry.iterrows():
+        anomalies.append(f"**Missing/Invalid Expiry:** {row['Health Facility']} has {row['Qty']} vials of {row['Vaccine']} (Lot: {row['Lot']}), but the expiry date cannot be read.")
+
+    return clean_df, stockouts_df, history_df, load_time, melted, anomalies
 
 # --- INITIALIZE DATA ---
-df_init, stockouts_init, history_init, last_sync, melted_init = load_and_prep_data()
+df_init, stockouts_init, history_init, last_sync, melted_init, anomalies_init = load_and_prep_data()
 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
@@ -184,6 +202,13 @@ st.markdown("""
 st.markdown('<h1 class="main-header">🏥 Abra: Physical Vaccine Inventory</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Live Provincial Logistics Command Center</p>', unsafe_allow_html=True)
 
+# --- TYPO CATCHER UI ---
+if anomalies_init:
+    with st.expander("🚨 DATA QUALITY ALERTS (Typo Catcher Active)", expanded=True):
+        st.error("The system detected potential data entry errors in the master Google Sheet. Please review:")
+        for anomaly in anomalies_init:
+            st.markdown(f"- {anomaly}")
+
 # --- TOP METRICS ---
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Active Vials", f"{df['Qty'].sum():,}")
@@ -201,7 +226,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📋 Raw Data Matrix", 
     "🔍 Recall Trace", 
     "🚨 Smart Redistribution",
-    "📈 Historical Trends"
+    "📈 Historical Trends & AI"
 ])
 
 with tab1:
@@ -397,8 +422,8 @@ with tab5:
         st.success("All Facilities are fully stocked across all vaccines.")
 
 with tab6:
-    st.subheader("📈 Historical Trends & Burn Rate")
-    st.write("The system automatically archives a snapshot of your inventory to the `HISTORY LOG` Google Sheet every 7 days to calculate provincial burn rates.")
+    st.subheader("📈 Historical Trends & AI Burn Rate")
+    st.write("The system archives a snapshot every 7 days to calculate provincial burn rates and forecast future stockouts.")
     st.markdown("---")
     
     if history_init.empty or 'Date' not in history_init.columns:
@@ -438,5 +463,35 @@ with tab6:
                 fig_trend.update_traces(line=dict(width=5), selector=dict(name='PROVINCIAL TOTAL'))
                 
             st.plotly_chart(fig_trend, use_container_width=True)
+            
+            # --- NEW: PREDICTIVE FORECASTER AI ---
+            st.markdown("### 🤖 Predictive Stockout Forecaster")
+            for facility in hist_facility:
+                fac_name = "PROVINCIAL TOTAL" if facility == "ALL FACILITIES (Provincial Total)" else facility
+                fac_df = plot_df[plot_df['Health Facility'] == fac_name].sort_values('Date')
+                
+                if len(fac_df) >= 2:
+                    first_record = fac_df.iloc[0]
+                    last_record = fac_df.iloc[-1]
+                    
+                    days_diff = (last_record['Date'] - first_record['Date']).days
+                    qty_diff = first_record['Qty'] - last_record['Qty']
+                    current_stock = last_record['Qty']
+                    
+                    if days_diff > 0 and qty_diff > 0:
+                        daily_burn = qty_diff / days_diff
+                        if current_stock > 0:
+                            days_left = int(current_stock / daily_burn)
+                            est_zero_date = last_record['Date'] + datetime.timedelta(days=days_left)
+                            st.info(f"**{fac_name}:** Burning ~{daily_burn:.1f} vials/day. Estimated stockout in **{days_left} days** ({est_zero_date.strftime('%b %d, %Y')}).")
+                        else:
+                            st.error(f"**{fac_name}:** Currently out of stock.")
+                    elif qty_diff < 0:
+                        st.success(f"**{fac_name}:** Stock levels have recently increased (Restocked).")
+                    else:
+                        st.write(f"**{fac_name}:** No vials consumed in the tracked period.")
+                else:
+                    st.write(f"**{fac_name}:** Not enough history generated yet to forecast (requires at least 7 days).")
+            
         else:
             st.info("Not enough historical data to chart this selection yet.")
