@@ -71,7 +71,6 @@ def load_and_prep_data():
     if history_df.empty or 'Date' not in history_df.columns:
         history_df = pd.DataFrame(columns=['Date', 'RHU', 'Vaccine', 'Qty'])
 
-    # Find the most recent snapshot date
     history_df['Date_Temp'] = pd.to_datetime(history_df['Date'], errors='coerce')
     last_snapshot_date = history_df['Date_Temp'].max()
 
@@ -79,37 +78,30 @@ def load_and_prep_data():
     today_date = pd.Timestamp(pst_now).normalize().tz_localize(None)
 
     needs_update = False
-    # If the sheet is empty OR the last snapshot was 7 or more days ago
     if pd.isna(last_snapshot_date):
         needs_update = True
     elif (today_date - last_snapshot_date).days >= 7:
         needs_update = True
 
     if needs_update:
-        # Generate exactly what today's inventory looks like
         snap_df = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
         snap_df.insert(0, 'Date', pst_now.strftime('%Y-%m-%d'))
 
-        # Combine old history with the new snapshot
         history_df = history_df.drop(columns=['Date_Temp'])
         updated_history = pd.concat([history_df, snap_df], ignore_index=True)
 
-        # Write it back to the Google Sheet silently in the background
         try:
-            conn.update(
-                worksheet="HISTORY LOG",
-                data=updated_history
-            )
+            conn.update(worksheet="HISTORY LOG", data=updated_history)
             history_df = updated_history
         except Exception as e:
-            print(f"Robot failed to write to History Log (Check Editor permissions): {e}")
+            print(f"Robot failed to write to History Log: {e}")
     else:
         history_df = history_df.drop(columns=['Date_Temp'])
         
     # --- END AUTOMATED SNAPSHOT ---
 
     # Stockout Logic (All Vaccines)
-    rhu_vax_totals = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+    rhu_vax_totals = melted.groupby(['RHU', 'RHU_Clean', 'Vaccine'])['Qty'].sum().reset_index()
     stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
     
     # Expiry Logic
@@ -141,10 +133,12 @@ def load_and_prep_data():
             
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
     load_time = pst_now.strftime("%I:%M %p")
-    return clean_df, stockouts_df, history_df, load_time
+    
+    # Need to return original melted df to Tab 2 for mapping zero quantities
+    return clean_df, stockouts_df, history_df, load_time, melted
 
 # --- INITIALIZE DATA ---
-df_init, stockouts_init, history_init, last_sync = load_and_prep_data()
+df_init, stockouts_init, history_init, last_sync, melted_init = load_and_prep_data()
 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
@@ -167,9 +161,12 @@ with st.sidebar:
 # Apply Global Filter
 df = df_init.copy()
 stockouts = stockouts_init.copy()
+melted_df = melted_init.copy()
+
 if global_rhu_filter:
     df = df[df['RHU'].isin(global_rhu_filter)]
     stockouts = stockouts[stockouts['RHU'].isin(global_rhu_filter)]
+    melted_df = melted_df[melted_df['RHU'].isin(global_rhu_filter)]
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -226,21 +223,88 @@ with tab1:
 
 with tab2:
     st.subheader("Geographical Distribution Map")
-    rhu_totals = df.groupby('RHU_Clean')['Qty'].sum().reset_index()
-    rhu_totals['Lat'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[0])
-    rhu_totals['Lon'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[1])
+    st.write("Visualizing cold chain stock levels and health statuses across the Cordillera Administrative Region.")
+    
+    # 1. Vaccine Radar Filter
+    map_vax = st.selectbox("🎯 Target Vaccine (Radar):", ["ALL VACCINES"] + sorted(melted_df['Vaccine'].unique()))
+    
+    # 2. Build Rich Map Data
+    all_rhus = list(ABRA_COORDS.keys()) if not global_rhu_filter else [r.strip().upper() for r in global_rhu_filter]
+    map_data = []
+    
+    for rhu in all_rhus:
+        if rhu not in ABRA_COORDS: continue
+        lat, lon = ABRA_COORDS[rhu]
+        
+        # Isolate Data
+        r_df = df[df['RHU_Clean'] == rhu]
+        r_stock = stockouts[stockouts['RHU_Clean'] == rhu]
+        
+        if map_vax != "ALL VACCINES":
+            r_df = r_df[r_df['Vaccine'] == map_vax]
+            r_stock = r_stock[r_stock['Vaccine'] == map_vax]
+            
+        total_qty = r_df['Qty'].sum() if not r_df.empty else 0
+        
+        # 3. Traffic Light Logic
+        if total_qty == 0:
+            status = "🚨 Stockout"
+        elif not r_df.empty and r_df['Days to Expiry'].min() <= 60:
+            status = "⚠️ At Risk (<60d Expiry)"
+        else:
+            status = "🟢 Healthy Stock"
+            
+        # 4. Hover Analytics Strings
+        missing_str = ", ".join(r_stock['Vaccine'].unique().tolist()) if not r_stock.empty else "None"
+        next_expiry = r_df['Expiry Date'].min().strftime('%b %d, %Y') if total_qty > 0 and pd.notnull(r_df['Expiry Date'].min()) else "N/A"
+        
+        map_data.append({
+            'RHU': rhu,
+            'Lat': lat,
+            'Lon': lon,
+            'Total Doses': total_qty,
+            'Health Status': status,
+            'Missing Vaccines': missing_str,
+            'Next Expiry': next_expiry,
+            'Display Size': max(total_qty, 1) # Ensures even 0 qty dots are visible
+        })
+        
+    map_df = pd.DataFrame(map_data)
     
     c1, c2 = st.columns([2, 1])
     with c1:
+        # 5. Render Map
         fig_map = px.scatter_mapbox(
-            rhu_totals, lat="Lat", lon="Lon", size="Qty", color="Qty",
-            hover_name="RHU_Clean", color_continuous_scale="Purpor", 
-            size_max=30, zoom=9.5, mapbox_style="carto-darkmatter"
+            map_df, lat="Lat", lon="Lon", size="Display Size", color="Health Status",
+            hover_name="RHU",
+            hover_data={
+                "Lat": False, "Lon": False, "Display Size": False,
+                "Total Doses": ":,", 
+                "Health Status": True, 
+                "Missing Vaccines": True, 
+                "Next Expiry": True
+            },
+            color_discrete_map={
+                "🚨 Stockout": "#ff4b4b", 
+                "⚠️ At Risk (<60d Expiry)": "#ffd700", 
+                "🟢 Healthy Stock": "#00cc66"
+            },
+            size_max=25, zoom=9.2, mapbox_style="carto-darkmatter"
         )
         fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
         st.plotly_chart(fig_map, use_container_width=True)
+        
     with c2:
-        fig_rhu = px.bar(rhu_totals.sort_values(by='Qty', ascending=False), x='Qty', y='RHU_Clean', orientation='h', color='Qty', color_continuous_scale='Purpor', template='plotly_dark')
+        bar_df = map_df.sort_values(by='Total Doses', ascending=True)
+        fig_rhu = px.bar(
+            bar_df, x='Total Doses', y='RHU', orientation='h', color='Health Status', 
+            color_discrete_map={
+                "🚨 Stockout": "#ff4b4b", 
+                "⚠️ At Risk (<60d Expiry)": "#ffd700", 
+                "🟢 Healthy Stock": "#00cc66"
+            }, 
+            template='plotly_dark'
+        )
         st.plotly_chart(fig_rhu, use_container_width=True)
 
 with tab3:
@@ -313,16 +377,13 @@ with tab6:
         with h_col1:
             hist_vax = st.selectbox("Select Vaccine to Track:", options=sorted(hist_df['Vaccine'].astype(str).unique()))
         with h_col2:
-            # --- UPGRADED "ALL RHUS" LOGIC ---
             rhu_options = ["ALL RHUS (Provincial Total)"] + sorted(hist_df['RHU'].astype(str).unique())
             hist_rhu = st.multiselect("Select RHUs to Compare:", options=rhu_options, default=["ALL RHUS (Provincial Total)"])
             
         if "ALL RHUS (Provincial Total)" in hist_rhu:
-            # Calculate the total provincial sum for that date
             total_df = hist_df[hist_df['Vaccine'] == hist_vax].groupby('Date')['Qty'].sum().reset_index()
             total_df['RHU'] = 'PROVINCIAL TOTAL'
             
-            # Check if they also selected specific individual RHUs to compare against the total
             other_rhus = [r for r in hist_rhu if r != "ALL RHUS (Provincial Total)"]
             if other_rhus:
                 other_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(other_rhus))]
@@ -333,14 +394,11 @@ with tab6:
             plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
         
         if not plot_df.empty:
-            # Added text='Qty' for data labels
             fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, text='Qty',
                                 title=f"{hist_vax} Stock Trend Over Time", template='plotly_dark')
             
-            # Position the labels nicely above the dots
             fig_trend.update_traces(textposition="top center")
             
-            # Make the Provincial Total line thicker so it stands out
             if "ALL RHUS (Provincial Total)" in hist_rhu:
                 fig_trend.update_traces(line=dict(width=5), selector=dict(name='PROVINCIAL TOTAL'))
                 
