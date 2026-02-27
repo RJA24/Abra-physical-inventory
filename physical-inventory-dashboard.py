@@ -201,24 +201,64 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 with tab1:
-    st.subheader("Action Required: Expiring or Expired Batches")
+    st.subheader("🚨 Expiry Radar & Action Items")
+    st.write("Monitor and export batches that require immediate pull-out or rapid deployment.")
+    
     urgent_df = df[df['Status'] != '🟢 SAFE'].sort_values(by='Days to Expiry')
     
     if not urgent_df.empty:
-        c1, c2 = st.columns([1, 2])
+        # Top Metrics Row specific to Expiry
+        e1, e2, e3, e4 = st.columns(4)
+        expired_vials = urgent_df[urgent_df['Status'] == '🚨 EXPIRED']['Qty'].sum()
+        critical_vials = urgent_df[urgent_df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum()
+        warning_vials = urgent_df[urgent_df['Status'] == '🟡 WARNING (2-4 Mos)']['Qty'].sum()
+        
+        e1.metric("Total Batches Flagged", len(urgent_df))
+        e2.metric("🚨 Expired Vials", f"{expired_vials:,}")
+        e3.metric("🔴 Critical Vials", f"{critical_vials:,}")
+        e4.metric("🟡 Warning Vials", f"{warning_vials:,}")
+        
+        st.markdown("---")
+        
+        # Chart and Export Row
+        c1, c2 = st.columns([2, 1])
         with c1:
-            st.metric("Batches at Risk", len(urgent_df))
-            csv = urgent_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Export Urgent List", csv, "urgent_list.csv", "text/csv")
-        with c2:
-            fig_status = px.bar(urgent_df['Status'].value_counts().reset_index(), x='Status', y='count', 
+            fig_status = px.bar(urgent_df['Status'].value_counts().reset_index(), y='Status', x='count', 
                                color='Status', color_discrete_map={'🚨 EXPIRED': '#ff4b4b', '🔴 CRITICAL (< 2 Mos)': '#ff8c00', '🟡 WARNING (2-4 Mos)': '#ffd700'},
-                               template='plotly_dark', height=200)
+                               template='plotly_dark', height=250, orientation='h', title="Flagged Batches by Urgency")
+            fig_status.update_layout(showlegend=False, xaxis_title="Number of Batches", yaxis_title="")
             st.plotly_chart(fig_status, use_container_width=True)
+            
+        with c2:
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.info("Download the complete list of flagged batches to coordinate pull-outs or rapid deployments with RHUs.")
+            csv = urgent_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Export Urgent Action List", csv, "urgent_list.csv", "text/csv", use_container_width=True)
 
-        st.dataframe(urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry Date', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+        st.markdown("### 📋 Categorized Action Lists")
+        
+        # Format the date for better readability
+        display_df = urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry Date', 'Qty', 'Days to Expiry', 'Status']].copy()
+        display_df['Expiry Date'] = display_df['Expiry Date'].dt.strftime('%b %d, %Y')
+        
+        # Expanders for each category
+        exp_expired = display_df[display_df['Status'] == '🚨 EXPIRED']
+        if not exp_expired.empty:
+            with st.expander(f"🚨 EXPIRED BATCHES - Do Not Use ({len(exp_expired)} batches)", expanded=True):
+                st.dataframe(exp_expired.drop(columns=['Status']), use_container_width=True, hide_index=True)
+                
+        exp_critical = display_df[display_df['Status'] == '🔴 CRITICAL (< 2 Mos)']
+        if not exp_critical.empty:
+            with st.expander(f"🔴 CRITICAL BATCHES - Deploy Immediately ({len(exp_critical)} batches)", expanded=True):
+                st.dataframe(exp_critical.drop(columns=['Status']), use_container_width=True, hide_index=True)
+                
+        exp_warning = display_df[display_df['Status'] == '🟡 WARNING (2-4 Mos)']
+        if not exp_warning.empty:
+            with st.expander(f"🟡 WARNING BATCHES - Monitor Closely ({len(exp_warning)} batches)", expanded=False):
+                st.dataframe(exp_warning.drop(columns=['Status']), use_container_width=True, hide_index=True)
+                
     else:
-        st.success("✅ All stock is currently within safe expiry limits.")
+        st.success("✅ All stock is currently within safe expiry limits. No action required.")
 
 with tab2:
     st.subheader("Geographical Distribution Map")
