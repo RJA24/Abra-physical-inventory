@@ -313,14 +313,33 @@ with tab6:
         with h_col1:
             hist_vax = st.selectbox("Select Vaccine to Track:", options=sorted(hist_df['Vaccine'].astype(str).unique()))
         with h_col2:
-            default_rhus = sorted(hist_df['RHU'].astype(str).unique())[:3] if not hist_df.empty else []
-            hist_rhu = st.multiselect("Select RHUs to Compare:", options=sorted(hist_df['RHU'].astype(str).unique()), default=default_rhus)
+            # --- UPGRADED "ALL RHUS" LOGIC ---
+            rhu_options = ["ALL RHUS (Provincial Total)"] + sorted(hist_df['RHU'].astype(str).unique())
+            hist_rhu = st.multiselect("Select RHUs to Compare:", options=rhu_options, default=["ALL RHUS (Provincial Total)"])
             
-        plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
+        if "ALL RHUS (Provincial Total)" in hist_rhu:
+            # Calculate the total provincial sum for that date
+            total_df = hist_df[hist_df['Vaccine'] == hist_vax].groupby('Date')['Qty'].sum().reset_index()
+            total_df['RHU'] = 'PROVINCIAL TOTAL'
+            
+            # Check if they also selected specific individual RHUs to compare against the total
+            other_rhus = [r for r in hist_rhu if r != "ALL RHUS (Provincial Total)"]
+            if other_rhus:
+                other_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(other_rhus))]
+                plot_df = pd.concat([total_df, other_df], ignore_index=True)
+            else:
+                plot_df = total_df
+        else:
+            plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
         
         if not plot_df.empty:
             fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, 
                                 title=f"{hist_vax} Stock Trend Over Time", template='plotly_dark')
+            
+            # Make the Provincial Total line thicker so it stands out
+            if "ALL RHUS (Provincial Total)" in hist_rhu:
+                fig_trend.update_traces(line=dict(width=5), selector=dict(name='PROVINCIAL TOTAL'))
+                
             st.plotly_chart(fig_trend, use_container_width=True)
         else:
             st.info("Not enough historical data to chart this selection yet.")
