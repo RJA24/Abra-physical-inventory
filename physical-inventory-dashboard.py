@@ -22,7 +22,17 @@ ABRA_COORDS = {
     'VILLAVICIOSA': [17.4333, 120.6333],
     'PHO': [17.5960, 120.6190], 'APH': [17.5940, 120.6180]
 }
-
+def render_footer():
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center; color: #888888; padding: 10px;'>
+            <p>Developed by <strong>JangTV</strong></p>
+            <img src="https://github.com/RJA24/abra-inventory-data--entry/blob/main/357094382_2458785624282603_4372984338912374777_n.png?raw=true" width="80" style="margin-top: -10px; opacity: 0.8;">
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
 # --- SECURE DATA CONNECTION & PARSING ---
 @st.cache_data(ttl=300) 
 def load_and_prep_data():
@@ -498,3 +508,5 @@ with tab6:
             
         else:
             st.info("Not enough historical data to chart this selection yet.")
+
+render_footer()
