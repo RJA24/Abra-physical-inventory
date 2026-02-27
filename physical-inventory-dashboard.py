@@ -333,8 +333,12 @@ with tab6:
             plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
         
         if not plot_df.empty:
-            fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, 
+            # Added text='Qty' for data labels
+            fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, text='Qty',
                                 title=f"{hist_vax} Stock Trend Over Time", template='plotly_dark')
+            
+            # Position the labels nicely above the dots
+            fig_trend.update_traces(textposition="top center")
             
             # Make the Provincial Total line thicker so it stands out
             if "ALL RHUS (Provincial Total)" in hist_rhu:
