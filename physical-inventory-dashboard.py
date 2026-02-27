@@ -134,7 +134,6 @@ def load_and_prep_data():
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
     load_time = pst_now.strftime("%I:%M %p")
     
-    # Need to return original melted df to Tab 2 for mapping zero quantities
     return clean_df, stockouts_df, history_df, load_time, melted
 
 # --- INITIALIZE DATA ---
@@ -183,7 +182,7 @@ st.markdown('<p class="sub-header">Live Provincial Logistics Command Center</p>'
 
 # --- TOP METRICS ---
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Total Active Doses", f"{df['Qty'].sum():,}")
+col1.metric("Total Active Vials", f"{df['Qty'].sum():,}")
 col2.metric("Locations Reported", f"{df['RHU'].nunique()}")
 col3.metric("🚨 Expired", f"{df[df['Status'] == '🚨 EXPIRED']['Qty'].sum():,}")
 col4.metric("🔴 Critical (<60d)", f"{df[df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum():,}")
@@ -262,7 +261,7 @@ with tab2:
             'RHU': rhu,
             'Lat': lat,
             'Lon': lon,
-            'Total Doses': total_qty,
+            'Total Vials': total_qty,
             'Health Status': status,
             'Missing Vaccines': missing_str,
             'Next Expiry': next_expiry,
@@ -279,7 +278,7 @@ with tab2:
             hover_name="RHU",
             hover_data={
                 "Lat": False, "Lon": False, "Display Size": False,
-                "Total Doses": ":,", 
+                "Total Vials": ":,", 
                 "Health Status": True, 
                 "Missing Vaccines": True, 
                 "Next Expiry": True
@@ -295,9 +294,9 @@ with tab2:
         st.plotly_chart(fig_map, use_container_width=True)
         
     with c2:
-        bar_df = map_df.sort_values(by='Total Doses', ascending=True)
+        bar_df = map_df.sort_values(by='Total Vials', ascending=True)
         fig_rhu = px.bar(
-            bar_df, x='Total Doses', y='RHU', orientation='h', color='Health Status', 
+            bar_df, x='Total Vials', y='RHU', orientation='h', color='Health Status', 
             color_discrete_map={
                 "🚨 Stockout": "#ff4b4b", 
                 "⚠️ At Risk (<60d Expiry)": "#ffd700", 
@@ -320,9 +319,9 @@ with tab4:
     if search_lot:
         res = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
         if not res.empty:
-            st.warning(f"Found {res['Qty'].sum()} doses of Lot {search_lot}")
+            st.warning(f"Found {res['Qty'].sum()} vials of Lot {search_lot}")
             st.dataframe(res[['RHU', 'Vaccine', 'Qty', 'Status']], use_container_width=True, hide_index=True)
-        else: st.success("No active doses found for this Lot.")
+        else: st.success("No active vials found for this Lot.")
 
 with tab5:
     st.subheader("🚨 Stockouts & Redistribution Strategy")
@@ -350,7 +349,7 @@ with tab5:
                         'To RHU': dest_rhu,
                         'Vaccine needed': missing_vax,
                         'Take from RHU': best_donor['RHU'],
-                        'Available': best_donor['Qty'],
+                        'Available Vials': best_donor['Qty'],
                         'Donor Expiry': best_donor['Expiry Date'].strftime('%b %d')
                     })
                     
@@ -395,7 +394,7 @@ with tab6:
         
         if not plot_df.empty:
             fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, text='Qty',
-                                title=f"{hist_vax} Stock Trend Over Time", template='plotly_dark')
+                                title=f"{hist_vax} Stock Trend Over Time (Vials)", template='plotly_dark')
             
             fig_trend.update_traces(textposition="top center")
             
