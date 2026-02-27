@@ -163,6 +163,10 @@ df_init, stockouts_init, history_init, last_sync, melted_init, anomalies_init = 
 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
+    # --- ABRA VALLEY BANNER ---
+    # Paste your image URL inside the quotes below!
+    st.image("https://github.com/RJA24/abra-inventory-data--entry/blob/main/Abra_Valley.jpg?raw=true", use_container_width=True)
+    
     st.title("🏥 Abra PHO")
     st.markdown("**Cold Chain Management System**")
     st.info(f"🕒 Last Sync (PST): {last_sync}")
@@ -170,14 +174,6 @@ with st.sidebar:
     if st.button("🔄 Force Refresh Now"):
         st.cache_data.clear()
         st.rerun()
-        
-    st.markdown("---")
-    st.subheader("Global Filters")
-    global_facility_filter = st.multiselect(
-        "Filter by Health Facility:",
-        options=sorted(df_init['Health Facility'].unique()),
-        help="Filters all charts and tables across the entire dashboard."
-    )
 
 # Apply Global Filter
 df = df_init.copy()
@@ -195,25 +191,6 @@ st.markdown("""
     .main-header { color: #4cc9f0; font-weight: bold; margin-bottom: 0px; }
     .sub-header { color: #a9d6e5; margin-top: 0px; margin-bottom: 20px; font-style: italic; }
     div[data-testid="stMetricValue"] { color: #BC13FE !important; }
-    
-    /* --- CUSTOM BACKGROUND IMAGE --- */
-    .stApp {
-        /* PASTE YOUR COPIED IMAGE LINK INSIDE THE QUOTES BELOW */
-        background-image: url("https://github.com/RJA24/abra-inventory-data--entry/blob/main/Abra_Valley.jpg?raw=true"); 
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-    }
-    
-    /* --- DARK OVERLAY --- */
-    /* This acts like a tinted window over your image so the neon text is still easy to read */
-    .stApp::before {
-        content: "";
-        position: absolute;
-        top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(14, 17, 23, 0.85); /* 85% dark fade */
-        z-index: -1;
-    }
     </style>
 """, unsafe_allow_html=True)
 
