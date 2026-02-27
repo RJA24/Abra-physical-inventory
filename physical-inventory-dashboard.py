@@ -9,7 +9,6 @@ import datetime
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- ABRA GEOSPATIAL DATA ---
-# Added PENARRUBIA (no ñ), PHO, and APH coordinates
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
     'BUCLOC': [17.4500, 120.8333], 'DAGUIOMAN': [17.4500, 120.9333], 'DANGLAS': [17.6333, 120.5833],
@@ -44,7 +43,7 @@ def load_and_prep_data():
                 ttl=300
             )
         except:
-            history_df = pd.DataFrame(columns=['Date', 'RHU', 'Vaccine', 'Qty'])
+            history_df = pd.DataFrame(columns=['Date', 'Health Facility', 'Vaccine', 'Qty'])
 
     except Exception as e:
         st.error(f"🚨 Connection Failed: {e}")
@@ -57,22 +56,24 @@ def load_and_prep_data():
     
     grid_df = raw_df.iloc[4:, 1:].copy()
     col_indices = list(range(len(vaccines)))
-    grid_df.columns = ['RHU'] + col_indices
-    grid_df = grid_df.dropna(subset=['RHU'])
-    grid_df = grid_df[~grid_df['RHU'].astype(str).str.contains('TOTAL|EXPIRING|MONTHS', case=False, na=False)]
+    grid_df.columns = ['Health Facility'] + col_indices
+    grid_df = grid_df.dropna(subset=['Health Facility'])
+    
+    # INDESTRUCTIBLE FILTER - Purges Total rows and visual separator junk like "-EXPIRING (6 MONTHS)"
+    grid_df = grid_df[~grid_df['Health Facility'].astype(str).str.contains('TOTAL|EXPIRING|MONTHS', case=False, na=False)]
     
     # Reshaping Data
-    melted = grid_df.melt(id_vars=['RHU'], var_name='ColIndex', value_name='Qty')
+    melted = grid_df.melt(id_vars=['Health Facility'], var_name='ColIndex', value_name='Qty')
     melted['Vaccine'] = [vaccines[i] for i in melted['ColIndex']]
     melted['Lot'] = [str(lots[i]) for i in melted['ColIndex']]
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
-    melted['RHU_Clean'] = melted['RHU'].astype(str).str.strip().str.upper()
+    melted['Facility_Clean'] = melted['Health Facility'].astype(str).str.strip().str.upper()
     
     # --- AUTOMATED 7-DAY HISTORICAL SNAPSHOT LOGIC ---
     if history_df.empty or 'Date' not in history_df.columns:
-        history_df = pd.DataFrame(columns=['Date', 'RHU', 'Vaccine', 'Qty'])
+        history_df = pd.DataFrame(columns=['Date', 'Health Facility', 'Vaccine', 'Qty'])
 
     history_df['Date_Temp'] = pd.to_datetime(history_df['Date'], errors='coerce')
     last_snapshot_date = history_df['Date_Temp'].max()
@@ -87,7 +88,7 @@ def load_and_prep_data():
         needs_update = True
 
     if needs_update:
-        snap_df = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+        snap_df = melted.groupby(['Health Facility', 'Vaccine'])['Qty'].sum().reset_index()
         snap_df.insert(0, 'Date', pst_now.strftime('%Y-%m-%d'))
 
         history_df = history_df.drop(columns=['Date_Temp'])
@@ -104,8 +105,8 @@ def load_and_prep_data():
     # --- END AUTOMATED SNAPSHOT ---
 
     # Stockout Logic (All Vaccines)
-    rhu_vax_totals = melted.groupby(['RHU', 'RHU_Clean', 'Vaccine'])['Qty'].sum().reset_index()
-    stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
+    facility_vax_totals = melted.groupby(['Health Facility', 'Facility_Clean', 'Vaccine'])['Qty'].sum().reset_index()
+    stockouts_df = facility_vax_totals[facility_vax_totals['Qty'] == 0].copy()
     
     # Expiry Logic
     clean_df = melted[melted['Qty'] > 0].copy()
@@ -154,9 +155,9 @@ with st.sidebar:
         
     st.markdown("---")
     st.subheader("Global Filters")
-    global_rhu_filter = st.multiselect(
-        "Filter by Municipality:",
-        options=sorted(df_init['RHU'].unique()),
+    global_facility_filter = st.multiselect(
+        "Filter by Health Facility:",
+        options=sorted(df_init['Health Facility'].unique()),
         help="Filters all charts and tables across the entire dashboard."
     )
 
@@ -165,10 +166,10 @@ df = df_init.copy()
 stockouts = stockouts_init.copy()
 melted_df = melted_init.copy()
 
-if global_rhu_filter:
-    df = df[df['RHU'].isin(global_rhu_filter)]
-    stockouts = stockouts[stockouts['RHU'].isin(global_rhu_filter)]
-    melted_df = melted_df[melted_df['RHU'].isin(global_rhu_filter)]
+if global_facility_filter:
+    df = df[df['Health Facility'].isin(global_facility_filter)]
+    stockouts = stockouts[stockouts['Health Facility'].isin(global_facility_filter)]
+    melted_df = melted_df[melted_df['Health Facility'].isin(global_facility_filter)]
 
 # --- CSS STYLING ---
 st.markdown("""
@@ -186,10 +187,10 @@ st.markdown('<p class="sub-header">Live Provincial Logistics Command Center</p>'
 # --- TOP METRICS ---
 col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Total Active Vials", f"{df['Qty'].sum():,}")
-col2.metric("Locations Reported", f"{df['RHU'].nunique()}")
+col2.metric("Locations Reported", f"{df['Health Facility'].nunique()}")
 col3.metric("🚨 Expired", f"{df[df['Status'] == '🚨 EXPIRED']['Qty'].sum():,}")
 col4.metric("🔴 Critical (<60d)", f"{df[df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum():,}")
-col5.metric("⚠️ Stockout RHUs", len(stockouts['RHU'].unique()))
+col5.metric("⚠️ Stockout Facilities", len(stockouts['Health Facility'].unique()))
 
 st.markdown("---")
 
@@ -232,13 +233,13 @@ with tab1:
             
         with c2:
             st.markdown("<br><br>", unsafe_allow_html=True)
-            st.info("Download the complete list of flagged batches to coordinate pull-outs or rapid deployments with RHUs.")
+            st.info("Download the complete list of flagged batches to coordinate pull-outs or rapid deployments with facilities.")
             csv = urgent_df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Export Urgent Action List", csv, "urgent_list.csv", "text/csv", use_container_width=True)
 
         st.markdown("### 📋 Categorized Action Lists")
         
-        display_df = urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry Date', 'Qty', 'Days to Expiry', 'Status']].copy()
+        display_df = urgent_df[['Health Facility', 'Vaccine', 'Lot', 'Expiry Date', 'Qty', 'Days to Expiry', 'Status']].copy()
         display_df['Expiry Date'] = display_df['Expiry Date'].dt.strftime('%b %d, %Y')
         
         exp_expired = display_df[display_df['Status'] == '🚨 EXPIRED']
@@ -265,17 +266,14 @@ with tab2:
     
     map_vax = st.selectbox("🎯 Target Vaccine (Radar):", ["ALL VACCINES"] + sorted(melted_df['Vaccine'].unique()))
     
-    # INDESTRUCTIBLE MAP LOGIC
-    # Extracts exactly what is in the dataframe, preventing missing-dictionary crashes
-    active_rhus = df['RHU_Clean'].unique()
+    active_facilities = df['Facility_Clean'].unique()
     map_data = []
     
-    for rhu in active_rhus:
-        # Failsafe: If an RHU isn't in the dictionary, drop its pin in Bangued by default
-        lat, lon = ABRA_COORDS.get(rhu, [17.5958, 120.6186])
+    for facility in active_facilities:
+        lat, lon = ABRA_COORDS.get(facility, [17.5958, 120.6186])
         
-        r_df = df[df['RHU_Clean'] == rhu]
-        r_stock = stockouts[stockouts['RHU_Clean'] == rhu]
+        r_df = df[df['Facility_Clean'] == facility]
+        r_stock = stockouts[stockouts['Facility_Clean'] == facility]
         
         if map_vax != "ALL VACCINES":
             r_df = r_df[r_df['Vaccine'] == map_vax]
@@ -294,7 +292,7 @@ with tab2:
         next_expiry = r_df['Expiry Date'].min().strftime('%b %d, %Y') if total_qty > 0 and pd.notnull(r_df['Expiry Date'].min()) else "N/A"
         
         map_data.append({
-            'RHU': rhu,
+            'Health Facility': facility,
             'Lat': lat,
             'Lon': lon,
             'Total Vials': total_qty,
@@ -311,7 +309,7 @@ with tab2:
         with c1:
             fig_map = px.scatter_mapbox(
                 map_df, lat="Lat", lon="Lon", size="Display Size", color="Health Status",
-                hover_name="RHU",
+                hover_name="Health Facility",
                 hover_data={
                     "Lat": False, "Lon": False, "Display Size": False,
                     "Total Vials": ":,", 
@@ -331,8 +329,8 @@ with tab2:
             
         with c2:
             bar_df = map_df.sort_values(by='Total Vials', ascending=True)
-            fig_rhu = px.bar(
-                bar_df, x='Total Vials', y='RHU', orientation='h', color='Health Status', 
+            fig_facility = px.bar(
+                bar_df, x='Total Vials', y='Health Facility', orientation='h', color='Health Status', 
                 color_discrete_map={
                     "🚨 Stockout": "#ff4b4b", 
                     "⚠️ At Risk (<60d Expiry)": "#ffd700", 
@@ -340,7 +338,7 @@ with tab2:
                 }, 
                 template='plotly_dark'
             )
-            st.plotly_chart(fig_rhu, use_container_width=True)
+            st.plotly_chart(fig_facility, use_container_width=True)
     else:
         st.warning("No geospatial data available for this specific selection.")
 
@@ -349,7 +347,7 @@ with tab3:
     vax_filter = st.multiselect("Filter by Vaccine Type:", options=sorted(df['Vaccine'].unique()))
     grid_view = df.copy()
     if vax_filter: grid_view = grid_view[grid_view['Vaccine'].isin(vax_filter)]
-    st.dataframe(grid_view[['RHU', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+    st.dataframe(grid_view[['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], use_container_width=True, hide_index=True)
 
 with tab4:
     st.subheader("🔍 Product Recall Search")
@@ -358,18 +356,18 @@ with tab4:
         res = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
         if not res.empty:
             st.warning(f"Found {res['Qty'].sum()} vials of Lot {search_lot}")
-            st.dataframe(res[['RHU', 'Vaccine', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+            st.dataframe(res[['Health Facility', 'Vaccine', 'Qty', 'Status']], use_container_width=True, hide_index=True)
         else: st.success("No active vials found for this Lot.")
 
 with tab5:
     st.subheader("🚨 Stockouts & Redistribution Strategy")
     if not stockouts.empty:
-        st.error(f"Alert: {len(stockouts['RHU'].unique())} reporting centers are missing one or more vaccines.")
+        st.error(f"Alert: {len(stockouts['Health Facility'].unique())} reporting centers are missing one or more vaccines.")
         
         c1, c2 = st.columns([1, 1.5])
         with c1:
             st.markdown("### Zero-Stock Facilities")
-            summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
+            summary = stockouts.groupby('Health Facility')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
             summary.rename(columns={'Vaccine': 'Missing'}, inplace=True)
             st.dataframe(summary, use_container_width=True, hide_index=True)
             
@@ -378,15 +376,15 @@ with tab5:
             suggestions = []
             for _, row in stockouts.iterrows():
                 missing_vax = row['Vaccine']
-                dest_rhu = row['RHU']
-                donors = df[(df['Vaccine'] == missing_vax) & (df['Qty'] > 50) & (df['RHU'] != dest_rhu)].copy()
+                dest_facility = row['Health Facility']
+                donors = df[(df['Vaccine'] == missing_vax) & (df['Qty'] > 50) & (df['Health Facility'] != dest_facility)].copy()
                 
                 if not donors.empty:
                     best_donor = donors.sort_values(by='Days to Expiry').iloc[0]
                     suggestions.append({
-                        'To RHU': dest_rhu,
+                        'To Facility': dest_facility,
                         'Vaccine needed': missing_vax,
-                        'Take from RHU': best_donor['RHU'],
+                        'Take from Facility': best_donor['Health Facility'],
                         'Available Vials': best_donor['Qty'],
                         'Donor Expiry': best_donor['Expiry Date'].strftime('%b %d')
                     })
@@ -396,7 +394,7 @@ with tab5:
             else:
                 st.info("No viable surplus donors found within the province for current stockouts.")
     else: 
-        st.success("All RHUs are fully stocked across all vaccines.")
+        st.success("All Facilities are fully stocked across all vaccines.")
 
 with tab6:
     st.subheader("📈 Historical Trends & Burn Rate")
@@ -414,29 +412,29 @@ with tab6:
         with h_col1:
             hist_vax = st.selectbox("Select Vaccine to Track:", options=sorted(hist_df['Vaccine'].astype(str).unique()))
         with h_col2:
-            rhu_options = ["ALL RHUS (Provincial Total)"] + sorted(hist_df['RHU'].astype(str).unique())
-            hist_rhu = st.multiselect("Select RHUs to Compare:", options=rhu_options, default=["ALL RHUS (Provincial Total)"])
+            facility_options = ["ALL FACILITIES (Provincial Total)"] + sorted(hist_df['Health Facility'].astype(str).unique())
+            hist_facility = st.multiselect("Select Facilities to Compare:", options=facility_options, default=["ALL FACILITIES (Provincial Total)"])
             
-        if "ALL RHUS (Provincial Total)" in hist_rhu:
+        if "ALL FACILITIES (Provincial Total)" in hist_facility:
             total_df = hist_df[hist_df['Vaccine'] == hist_vax].groupby('Date')['Qty'].sum().reset_index()
-            total_df['RHU'] = 'PROVINCIAL TOTAL'
+            total_df['Health Facility'] = 'PROVINCIAL TOTAL'
             
-            other_rhus = [r for r in hist_rhu if r != "ALL RHUS (Provincial Total)"]
-            if other_rhus:
-                other_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(other_rhus))]
+            other_facilities = [f for f in hist_facility if f != "ALL FACILITIES (Provincial Total)"]
+            if other_facilities:
+                other_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['Health Facility'].isin(other_facilities))]
                 plot_df = pd.concat([total_df, other_df], ignore_index=True)
             else:
                 plot_df = total_df
         else:
-            plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
+            plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['Health Facility'].isin(hist_facility))]
         
         if not plot_df.empty:
-            fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, text='Qty',
+            fig_trend = px.line(plot_df, x='Date', y='Qty', color='Health Facility', markers=True, text='Qty',
                                 title=f"{hist_vax} Stock Trend Over Time (Vials)", template='plotly_dark')
             
             fig_trend.update_traces(textposition="top center")
             
-            if "ALL RHUS (Provincial Total)" in hist_rhu:
+            if "ALL FACILITIES (Provincial Total)" in hist_facility:
                 fig_trend.update_traces(line=dict(width=5), selector=dict(name='PROVINCIAL TOTAL'))
                 
             st.plotly_chart(fig_trend, use_container_width=True)
