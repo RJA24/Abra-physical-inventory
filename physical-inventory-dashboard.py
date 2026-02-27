@@ -24,8 +24,9 @@ ABRA_COORDS = {
 # --- SECURE DATA CONNECTION & PARSING ---
 @st.cache_data(ttl=300) 
 def load_and_prep_data():
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    
     try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
         raw_df = conn.read(
             spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
             worksheet="PHYSICAL INVENTORY1",
@@ -40,7 +41,7 @@ def load_and_prep_data():
                 ttl=300
             )
         except:
-            history_df = pd.DataFrame() 
+            history_df = pd.DataFrame(columns=['Date', 'RHU', 'Vaccine', 'Qty'])
 
     except Exception as e:
         st.error(f"🚨 Connection Failed: {e}")
@@ -66,6 +67,47 @@ def load_and_prep_data():
     
     melted['RHU_Clean'] = melted['RHU'].astype(str).str.strip().str.upper()
     
+    # --- AUTOMATED 7-DAY HISTORICAL SNAPSHOT LOGIC ---
+    if history_df.empty or 'Date' not in history_df.columns:
+        history_df = pd.DataFrame(columns=['Date', 'RHU', 'Vaccine', 'Qty'])
+
+    # Find the most recent snapshot date
+    history_df['Date_Temp'] = pd.to_datetime(history_df['Date'], errors='coerce')
+    last_snapshot_date = history_df['Date_Temp'].max()
+
+    pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
+    today_date = pd.Timestamp(pst_now).normalize().tz_localize(None)
+
+    needs_update = False
+    # If the sheet is empty OR the last snapshot was 7 or more days ago
+    if pd.isna(last_snapshot_date):
+        needs_update = True
+    elif (today_date - last_snapshot_date).days >= 7:
+        needs_update = True
+
+    if needs_update:
+        # Generate exactly what today's inventory looks like
+        snap_df = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+        snap_df.insert(0, 'Date', pst_now.strftime('%Y-%m-%d'))
+
+        # Combine old history with the new snapshot
+        history_df = history_df.drop(columns=['Date_Temp'])
+        updated_history = pd.concat([history_df, snap_df], ignore_index=True)
+
+        # Write it back to the Google Sheet silently in the background
+        try:
+            conn.update(
+                worksheet="HISTORY LOG",
+                data=updated_history
+            )
+            history_df = updated_history
+        except Exception as e:
+            print(f"Robot failed to write to History Log (Check Editor permissions): {e}")
+    else:
+        history_df = history_df.drop(columns=['Date_Temp'])
+        
+    # --- END AUTOMATED SNAPSHOT ---
+
     # Stockout Logic (All Vaccines)
     rhu_vax_totals = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
     stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
@@ -88,11 +130,7 @@ def load_and_prep_data():
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce').dt.tz_localize(None)
 
-    # Locking to PST
-    utc_now = datetime.datetime.now(datetime.timezone.utc)
-    pst_now = utc_now + datetime.timedelta(hours=8)
-    today = pd.Timestamp(pst_now).normalize().tz_localize(None)
-    clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
+    clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today_date).dt.days
     
     def get_status(days):
         if pd.isna(days): return '⚪ UNKNOWN'
@@ -261,23 +299,11 @@ with tab5:
 
 with tab6:
     st.subheader("📈 Historical Trends & Burn Rate")
-    
-    # 1. Snapshot Generator (Always visible so you can export data)
-    st.markdown("### 💾 Record Today's Snapshot")
-    st.write("Click below to download today's total inventory. Copy the data from the CSV and paste it directly into your `HISTORY LOG` Google Sheet.")
-    
-    snapshot_df = df_init.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
-    pst_date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
-    snapshot_df.insert(0, 'Date', pst_date)
-    
-    csv_snapshot = snapshot_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Snapshot for Google Sheets", csv_snapshot, f"history_snapshot_{pst_date}.csv", "text/csv")
-    
+    st.write("The system automatically archives a snapshot of your inventory to the `HISTORY LOG` Google Sheet every 7 days to calculate provincial burn rates.")
     st.markdown("---")
     
-    # 2. The Trend Engine
     if history_init.empty or 'Date' not in history_init.columns:
-        st.warning("⚠️ Waiting for data! Once you paste your snapshots into the `HISTORY LOG` tab, the trend charts will appear here automatically.")
+        st.warning("⚠️ Preparing database. Check back soon for trend analysis.")
     else:
         hist_df = history_init.copy()
         hist_df['Date'] = pd.to_datetime(hist_df['Date'], errors='coerce')
