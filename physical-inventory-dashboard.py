@@ -9,16 +9,19 @@ import datetime
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- ABRA GEOSPATIAL DATA ---
+# Added PENARRUBIA (no ñ), PHO, and APH coordinates
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
     'BUCLOC': [17.4500, 120.8333], 'DAGUIOMAN': [17.4500, 120.9333], 'DANGLAS': [17.6333, 120.5833],
     'DOLORES': [17.6500, 120.6500], 'LA PAZ': [17.6667, 120.6333], 'LACUB': [17.6667, 120.9333],
     'LAGANGILANG': [17.6167, 120.7333], 'LAGAYAN': [17.7167, 120.6333], 'LANGIDEN': [17.5833, 120.5667],
     'LICUAN-BAAY': [17.5667, 120.8833], 'LUBA': [17.3167, 120.6833], 'MALIBCONG': [17.5667, 120.9833],
-    'MANABO': [17.4333, 120.7000], 'PEÑARRUBIA': [17.5667, 120.6333], 'PIDIGAN': [17.5667, 120.5833],
-    'PILAR': [17.4167, 120.6000], 'SALLAPADAN': [17.4500, 120.7667], 'SAN ISIDRO': [17.4667, 120.6000],
-    'SAN JUAN': [17.6833, 120.6167], 'SAN QUINTIN': [17.5333, 120.5167], 'TAYUM': [17.6000, 120.6500],
-    'TINEG': [17.7833, 120.9333], 'TUBO': [17.2333, 120.8000], 'VILLAVICIOSA': [17.4333, 120.6333]
+    'MANABO': [17.4333, 120.7000], 'PEÑARRUBIA': [17.5667, 120.6333], 'PENARRUBIA': [17.5667, 120.6333],
+    'PIDIGAN': [17.5667, 120.5833], 'PILAR': [17.4167, 120.6000], 'SALLAPADAN': [17.4500, 120.7667],
+    'SAN ISIDRO': [17.4667, 120.6000], 'SAN JUAN': [17.6833, 120.6167], 'SAN QUINTIN': [17.5333, 120.5167],
+    'TAYUM': [17.6000, 120.6500], 'TINEG': [17.7833, 120.9333], 'TUBO': [17.2333, 120.8000], 
+    'VILLAVICIOSA': [17.4333, 120.6333],
+    'PHO': [17.5960, 120.6190], 'APH': [17.5940, 120.6180]
 }
 
 # --- SECURE DATA CONNECTION & PARSING ---
@@ -207,7 +210,6 @@ with tab1:
     urgent_df = df[df['Status'] != '🟢 SAFE'].sort_values(by='Days to Expiry')
     
     if not urgent_df.empty:
-        # Top Metrics Row specific to Expiry
         e1, e2, e3, e4 = st.columns(4)
         expired_vials = urgent_df[urgent_df['Status'] == '🚨 EXPIRED']['Qty'].sum()
         critical_vials = urgent_df[urgent_df['Status'] == '🔴 CRITICAL (< 2 Mos)']['Qty'].sum()
@@ -220,7 +222,6 @@ with tab1:
         
         st.markdown("---")
         
-        # Chart and Export Row
         c1, c2 = st.columns([2, 1])
         with c1:
             fig_status = px.bar(urgent_df['Status'].value_counts().reset_index(), y='Status', x='count', 
@@ -237,11 +238,9 @@ with tab1:
 
         st.markdown("### 📋 Categorized Action Lists")
         
-        # Format the date for better readability
         display_df = urgent_df[['RHU', 'Vaccine', 'Lot', 'Expiry Date', 'Qty', 'Days to Expiry', 'Status']].copy()
         display_df['Expiry Date'] = display_df['Expiry Date'].dt.strftime('%b %d, %Y')
         
-        # Expanders for each category
         exp_expired = display_df[display_df['Status'] == '🚨 EXPIRED']
         if not exp_expired.empty:
             with st.expander(f"🚨 EXPIRED BATCHES - Do Not Use ({len(exp_expired)} batches)", expanded=True):
@@ -264,18 +263,17 @@ with tab2:
     st.subheader("Geographical Distribution Map")
     st.write("Visualizing cold chain stock levels and health statuses across the Cordillera Administrative Region.")
     
-    # 1. Vaccine Radar Filter
     map_vax = st.selectbox("🎯 Target Vaccine (Radar):", ["ALL VACCINES"] + sorted(melted_df['Vaccine'].unique()))
     
-    # 2. Build Rich Map Data
-    all_rhus = list(ABRA_COORDS.keys()) if not global_rhu_filter else [r.strip().upper() for r in global_rhu_filter]
+    # INDESTRUCTIBLE MAP LOGIC
+    # Extracts exactly what is in the dataframe, preventing missing-dictionary crashes
+    active_rhus = df['RHU_Clean'].unique()
     map_data = []
     
-    for rhu in all_rhus:
-        if rhu not in ABRA_COORDS: continue
-        lat, lon = ABRA_COORDS[rhu]
+    for rhu in active_rhus:
+        # Failsafe: If an RHU isn't in the dictionary, drop its pin in Bangued by default
+        lat, lon = ABRA_COORDS.get(rhu, [17.5958, 120.6186])
         
-        # Isolate Data
         r_df = df[df['RHU_Clean'] == rhu]
         r_stock = stockouts[stockouts['RHU_Clean'] == rhu]
         
@@ -285,7 +283,6 @@ with tab2:
             
         total_qty = r_df['Qty'].sum() if not r_df.empty else 0
         
-        # 3. Traffic Light Logic
         if total_qty == 0:
             status = "🚨 Stockout"
         elif not r_df.empty and r_df['Days to Expiry'].min() <= 60:
@@ -293,7 +290,6 @@ with tab2:
         else:
             status = "🟢 Healthy Stock"
             
-        # 4. Hover Analytics Strings
         missing_str = ", ".join(r_stock['Vaccine'].unique().tolist()) if not r_stock.empty else "None"
         next_expiry = r_df['Expiry Date'].min().strftime('%b %d, %Y') if total_qty > 0 and pd.notnull(r_df['Expiry Date'].min()) else "N/A"
         
@@ -305,46 +301,48 @@ with tab2:
             'Health Status': status,
             'Missing Vaccines': missing_str,
             'Next Expiry': next_expiry,
-            'Display Size': max(total_qty, 1) # Ensures even 0 qty dots are visible
+            'Display Size': max(total_qty, 1)
         })
         
     map_df = pd.DataFrame(map_data)
     
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        # 5. Render Map
-        fig_map = px.scatter_mapbox(
-            map_df, lat="Lat", lon="Lon", size="Display Size", color="Health Status",
-            hover_name="RHU",
-            hover_data={
-                "Lat": False, "Lon": False, "Display Size": False,
-                "Total Vials": ":,", 
-                "Health Status": True, 
-                "Missing Vaccines": True, 
-                "Next Expiry": True
-            },
-            color_discrete_map={
-                "🚨 Stockout": "#ff4b4b", 
-                "⚠️ At Risk (<60d Expiry)": "#ffd700", 
-                "🟢 Healthy Stock": "#00cc66"
-            },
-            size_max=25, zoom=9.2, mapbox_style="carto-darkmatter"
-        )
-        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-        st.plotly_chart(fig_map, use_container_width=True)
-        
-    with c2:
-        bar_df = map_df.sort_values(by='Total Vials', ascending=True)
-        fig_rhu = px.bar(
-            bar_df, x='Total Vials', y='RHU', orientation='h', color='Health Status', 
-            color_discrete_map={
-                "🚨 Stockout": "#ff4b4b", 
-                "⚠️ At Risk (<60d Expiry)": "#ffd700", 
-                "🟢 Healthy Stock": "#00cc66"
-            }, 
-            template='plotly_dark'
-        )
-        st.plotly_chart(fig_rhu, use_container_width=True)
+    if not map_df.empty:
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            fig_map = px.scatter_mapbox(
+                map_df, lat="Lat", lon="Lon", size="Display Size", color="Health Status",
+                hover_name="RHU",
+                hover_data={
+                    "Lat": False, "Lon": False, "Display Size": False,
+                    "Total Vials": ":,", 
+                    "Health Status": True, 
+                    "Missing Vaccines": True, 
+                    "Next Expiry": True
+                },
+                color_discrete_map={
+                    "🚨 Stockout": "#ff4b4b", 
+                    "⚠️ At Risk (<60d Expiry)": "#ffd700", 
+                    "🟢 Healthy Stock": "#00cc66"
+                },
+                size_max=25, zoom=9.2, mapbox_style="carto-darkmatter"
+            )
+            fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+            st.plotly_chart(fig_map, use_container_width=True)
+            
+        with c2:
+            bar_df = map_df.sort_values(by='Total Vials', ascending=True)
+            fig_rhu = px.bar(
+                bar_df, x='Total Vials', y='RHU', orientation='h', color='Health Status', 
+                color_discrete_map={
+                    "🚨 Stockout": "#ff4b4b", 
+                    "⚠️ At Risk (<60d Expiry)": "#ffd700", 
+                    "🟢 Healthy Stock": "#00cc66"
+                }, 
+                template='plotly_dark'
+            )
+            st.plotly_chart(fig_rhu, use_container_width=True)
+    else:
+        st.warning("No geospatial data available for this specific selection.")
 
 with tab3:
     st.subheader("Searchable Data Grid")
@@ -366,7 +364,7 @@ with tab4:
 with tab5:
     st.subheader("🚨 Stockouts & Redistribution Strategy")
     if not stockouts.empty:
-        st.error(f"Alert: {len(stockouts['RHU'].unique())} municipalities are missing one or more vaccines.")
+        st.error(f"Alert: {len(stockouts['RHU'].unique())} reporting centers are missing one or more vaccines.")
         
         c1, c2 = st.columns([1, 1.5])
         with c1:
