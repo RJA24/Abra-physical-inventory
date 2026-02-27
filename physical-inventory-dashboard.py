@@ -69,10 +69,8 @@ def load_and_prep_data():
     # Clean up RHU names for coordinate mapping
     melted['RHU_Clean'] = melted['RHU'].astype(str).str.strip().str.upper()
     
-    # Stockout Logic
-    critical_vaxes = ['BCG', 'bOPV', 'PENTAVALENT', 'MR']
-    crit_df = melted[melted['Vaccine'].isin(critical_vaxes)]
-    rhu_vax_totals = crit_df.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+    # --- UPDATED: Track ALL Vaccines for Stockouts ---
+    rhu_vax_totals = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
     stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
     
     # Expiry Logic
@@ -231,9 +229,9 @@ with tab4:
         else: st.success("No active doses found for this Lot.")
 
 with tab5:
-    st.subheader("🚨 Critical Stockouts & Redistribution Strategy")
+    st.subheader("🚨 Stockouts & Redistribution Strategy")
     if not stockouts.empty:
-        st.error(f"Alert: {len(stockouts['RHU'].unique())} municipalities are missing primary vaccine types.")
+        st.error(f"Alert: {len(stockouts['RHU'].unique())} municipalities are missing one or more vaccines.")
         
         c1, c2 = st.columns([1, 1.5])
         with c1:
@@ -270,7 +268,7 @@ with tab5:
             else:
                 st.info("No viable surplus donors found within the province for current stockouts.")
     else: 
-        st.success("All RHUs have primary vaccine coverage.")
+        st.success("All RHUs are fully stocked across all vaccines.")
 
 with tab6:
     st.subheader("📈 Historical Trends & Burn Rate")
