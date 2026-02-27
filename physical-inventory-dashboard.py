@@ -4,8 +4,6 @@ import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 import calendar
 import datetime
-import smtplib
-from email.mime.text import MIMEText
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
@@ -70,6 +68,7 @@ def load_and_prep_data():
     # --- LOCKING TO PHILIPPINE STANDARD TIME (UTC+8) ---
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     pst_now = utc_now + datetime.timedelta(hours=8)
+    # tz_localize(None) makes the timestamp "naive" so it can be subtracted from the data
     today = pd.Timestamp(pst_now).normalize().tz_localize(None)
     
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
@@ -85,45 +84,8 @@ def load_and_prep_data():
     load_time = pst_now.strftime("%I:%M %p")
     return clean_df, stockouts_df, load_time
 
-# --- EMAIL ALERT FUNCTION ---
-def send_executive_alert(urgent_df, stockouts_df):
-    try:
-        # Pulls secure credentials from Streamlit Secrets
-        email_sender = st.secrets["email"]["sender"]
-        email_password = st.secrets["email"]["password"]
-        email_receiver = st.secrets["email"]["receiver"]
-        
-        pst_now = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime('%b %d, %Y')
-        subject = f"🚨 URGENT: Abra PHO Logistics Alert - {pst_now}"
-        
-        body = f"Abra Provincial Health Office - Automated Logistics Report\nGenerated on: {pst_now}\n\n"
-        
-        if not stockouts_df.empty:
-            body += "⚠️ CRITICAL ZERO-STOCK ALERTS (Primary Vaccines):\n"
-            summary = stockouts_df.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
-            body += summary.to_string(index=False) + "\n\n"
-            
-        if not urgent_df.empty:
-            body += "🚨 EXPIRING BATCHES ACTION REQUIRED:\n"
-            body += urgent_df[['RHU', 'Vaccine', 'Lot', 'Days to Expiry', 'Qty']].to_string(index=False)
-            
-        msg = MIMEText(body)
-        msg['Subject'] = subject
-        msg['From'] = email_sender
-        msg['To'] = email_receiver
-
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp_server:
-            smtp_server.login(email_sender, email_password)
-            smtp_server.sendmail(email_sender, email_receiver, msg.as_string())
-            
-        return True
-    except Exception as e:
-        st.error(f"Email failed to send. Error: {e}")
-        return False
-
 # --- INITIALIZE DATA ---
 df_init, stockouts_init, last_sync = load_and_prep_data()
-urgent_data = df_init[df_init['Status'] != '🟢 SAFE'].sort_values(by='Days to Expiry')
 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
@@ -134,14 +96,6 @@ with st.sidebar:
     if st.button("🔄 Force Refresh Now"):
         st.cache_data.clear()
         st.rerun()
-        
-    st.markdown("---")
-    st.subheader("Automated Reports")
-    if st.button("📧 Send Alert to PHO Lead", type="primary"):
-        with st.spinner("Transmitting logistics report..."):
-            success = send_executive_alert(urgent_data, stockouts_init)
-            if success:
-                st.success("✅ Report successfully emailed!")
         
     st.markdown("---")
     st.subheader("Global Filters")
