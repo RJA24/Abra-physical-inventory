@@ -9,7 +9,6 @@ import datetime
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
 # --- ABRA GEOSPATIAL DATA ---
-# Approximate coordinates for the 27 municipalities to enable the Heat Map
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
     'BUCLOC': [17.4500, 120.8333], 'DAGUIOMAN': [17.4500, 120.9333], 'DANGLAS': [17.6333, 120.5833],
@@ -34,7 +33,6 @@ def load_and_prep_data():
             ttl=300
         )
         
-        # Look for the Historical Data tab (Fails gracefully if it doesn't exist yet)
         try:
             history_df = conn.read(
                 spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
@@ -42,7 +40,7 @@ def load_and_prep_data():
                 ttl=300
             )
         except:
-            history_df = pd.DataFrame() # Return empty shell if not set up
+            history_df = pd.DataFrame() 
 
     except Exception as e:
         st.error(f"🚨 Connection Failed: {e}")
@@ -66,10 +64,9 @@ def load_and_prep_data():
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
-    # Clean up RHU names for coordinate mapping
     melted['RHU_Clean'] = melted['RHU'].astype(str).str.strip().str.upper()
     
-    # --- UPDATED: Track ALL Vaccines for Stockouts ---
+    # Stockout Logic (All Vaccines)
     rhu_vax_totals = melted.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
     stockouts_df = rhu_vax_totals[rhu_vax_totals['Qty'] == 0].copy()
     
@@ -91,7 +88,7 @@ def load_and_prep_data():
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce').dt.tz_localize(None)
 
-    # Locking to Philippine Standard Time
+    # Locking to PST
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     pst_now = utc_now + datetime.timedelta(hours=8)
     today = pd.Timestamp(pst_now).normalize().tz_localize(None)
@@ -191,9 +188,6 @@ with tab1:
 
 with tab2:
     st.subheader("Geographical Distribution Map")
-    st.write("Visualizing cold chain stock levels across the Cordillera Administrative Region.")
-    
-    # Prepare Map Data
     rhu_totals = df.groupby('RHU_Clean')['Qty'].sum().reset_index()
     rhu_totals['Lat'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[0])
     rhu_totals['Lon'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[1])
@@ -242,18 +236,13 @@ with tab5:
             
         with c2:
             st.markdown("### 🧠 Smart Redistribution Matches")
-            st.write("Matching stockouts with nearby facilities holding surplus or expiring doses.")
-            
             suggestions = []
             for _, row in stockouts.iterrows():
                 missing_vax = row['Vaccine']
                 dest_rhu = row['RHU']
-                
-                # Find donors with > 50 doses of the missing vaccine
                 donors = df[(df['Vaccine'] == missing_vax) & (df['Qty'] > 50) & (df['RHU'] != dest_rhu)].copy()
                 
                 if not donors.empty:
-                    # Sort so the donor with the earliest expiry is recommended first
                     best_donor = donors.sort_values(by='Days to Expiry').iloc[0]
                     suggestions.append({
                         'To RHU': dest_rhu,
@@ -272,14 +261,40 @@ with tab5:
 
 with tab6:
     st.subheader("📈 Historical Trends & Burn Rate")
-    if history_init.empty:
-        st.info("""
-        **System Notice: Historical Database Offline.**
-        
-        To activate time-lapse charting and track vaccine consumption rates over months, create a new worksheet named exactly **HISTORY LOG** inside your main Google Sheet.
-        
-        *Once the log is detected, this tab will automatically deploy trendlines.*
-        """)
+    
+    # 1. Snapshot Generator (Always visible so you can export data)
+    st.markdown("### 💾 Record Today's Snapshot")
+    st.write("Click below to download today's total inventory. Copy the data from the CSV and paste it directly into your `HISTORY LOG` Google Sheet.")
+    
+    snapshot_df = df_init.groupby(['RHU', 'Vaccine'])['Qty'].sum().reset_index()
+    pst_date = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
+    snapshot_df.insert(0, 'Date', pst_date)
+    
+    csv_snapshot = snapshot_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Snapshot for Google Sheets", csv_snapshot, f"history_snapshot_{pst_date}.csv", "text/csv")
+    
+    st.markdown("---")
+    
+    # 2. The Trend Engine
+    if history_init.empty or 'Date' not in history_init.columns:
+        st.warning("⚠️ Waiting for data! Once you paste your snapshots into the `HISTORY LOG` tab, the trend charts will appear here automatically.")
     else:
-        st.success("History Log detected! Ready for charting integration.")
-        st.dataframe(history_init, use_container_width=True)
+        hist_df = history_init.copy()
+        hist_df['Date'] = pd.to_datetime(hist_df['Date'], errors='coerce')
+        hist_df['Qty'] = pd.to_numeric(hist_df['Qty'], errors='coerce').fillna(0)
+        
+        h_col1, h_col2 = st.columns(2)
+        with h_col1:
+            hist_vax = st.selectbox("Select Vaccine to Track:", options=sorted(hist_df['Vaccine'].astype(str).unique()))
+        with h_col2:
+            default_rhus = sorted(hist_df['RHU'].astype(str).unique())[:3] if not hist_df.empty else []
+            hist_rhu = st.multiselect("Select RHUs to Compare:", options=sorted(hist_df['RHU'].astype(str).unique()), default=default_rhus)
+            
+        plot_df = hist_df[(hist_df['Vaccine'] == hist_vax) & (hist_df['RHU'].isin(hist_rhu))]
+        
+        if not plot_df.empty:
+            fig_trend = px.line(plot_df, x='Date', y='Qty', color='RHU', markers=True, 
+                                title=f"{hist_vax} Stock Trend Over Time", template='plotly_dark')
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("Not enough historical data to chart this selection yet.")
