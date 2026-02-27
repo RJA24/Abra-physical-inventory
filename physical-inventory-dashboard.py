@@ -12,8 +12,12 @@ st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", pag
 if 'has_logged_in' not in st.session_state:
     try:
         tracker_conn = st.connection("gsheets", type=GSheetsConnection)
+        
+        # The Master Google Sheet Link
+        SHEET_URL = "https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4"
+        
         access_df = tracker_conn.read(
-            spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
+            spreadsheet=SHEET_URL,
             worksheet="ACCESS LOG",
             ttl=0 
         )
@@ -29,16 +33,19 @@ if 'has_logged_in' not in st.session_state:
         else:
             updated_log = pd.concat([access_df, new_entry], ignore_index=True)
             
-        tracker_conn.update(worksheet="ACCESS LOG", data=updated_log)
+        # FIX: We now explicitly tell it WHICH spreadsheet to update!
+        tracker_conn.update(
+            spreadsheet=SHEET_URL,
+            worksheet="ACCESS LOG", 
+            data=updated_log
+        )
         st.session_state.has_logged_in = True
         
         # This will flash green on your screen if it works
         st.success("✅ DEBUG: Tracker successfully wrote to Google Sheets!") 
         
     except Exception as e:
-        # This will flash red and tell us exactly why it failed
         st.error(f"🚨 TRACKER ERROR: {e}")
-
 # --- ABRA GEOSPATIAL DATA ---
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
