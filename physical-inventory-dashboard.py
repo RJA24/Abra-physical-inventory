@@ -59,7 +59,7 @@ def load_and_prep_data():
     col_indices = list(range(len(vaccines)))
     grid_df.columns = ['RHU'] + col_indices
     grid_df = grid_df.dropna(subset=['RHU'])
-    grid_df = grid_df[~grid_df['RHU'].astype(str).str.contains('TOTAL', case=False, na=False)]
+    grid_df = grid_df[~grid_df['RHU'].astype(str).str.contains('TOTAL|EXPIRING|MONTHS', case=False, na=False)]
     
     # Reshaping Data
     melted = grid_df.melt(id_vars=['RHU'], var_name='ColIndex', value_name='Qty')
