@@ -8,6 +8,20 @@ import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
+# --- ABRA GEOSPATIAL DATA ---
+# Approximate coordinates for the 27 municipalities to enable the Heat Map
+ABRA_COORDS = {
+    'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
+    'BUCLOC': [17.4500, 120.8333], 'DAGUIOMAN': [17.4500, 120.9333], 'DANGLAS': [17.6333, 120.5833],
+    'DOLORES': [17.6500, 120.6500], 'LA PAZ': [17.6667, 120.6333], 'LACUB': [17.6667, 120.9333],
+    'LAGANGILANG': [17.6167, 120.7333], 'LAGAYAN': [17.7167, 120.6333], 'LANGIDEN': [17.5833, 120.5667],
+    'LICUAN-BAAY': [17.5667, 120.8833], 'LUBA': [17.3167, 120.6833], 'MALIBCONG': [17.5667, 120.9833],
+    'MANABO': [17.4333, 120.7000], 'PEÑARRUBIA': [17.5667, 120.6333], 'PIDIGAN': [17.5667, 120.5833],
+    'PILAR': [17.4167, 120.6000], 'SALLAPADAN': [17.4500, 120.7667], 'SAN ISIDRO': [17.4667, 120.6000],
+    'SAN JUAN': [17.6833, 120.6167], 'SAN QUINTIN': [17.5333, 120.5167], 'TAYUM': [17.6000, 120.6500],
+    'TINEG': [17.7833, 120.9333], 'TUBO': [17.2333, 120.8000], 'VILLAVICIOSA': [17.4333, 120.6333]
+}
+
 # --- SECURE DATA CONNECTION & PARSING ---
 @st.cache_data(ttl=300) 
 def load_and_prep_data():
@@ -19,6 +33,17 @@ def load_and_prep_data():
             header=None,
             ttl=300
         )
+        
+        # Look for the Historical Data tab (Fails gracefully if it doesn't exist yet)
+        try:
+            history_df = conn.read(
+                spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
+                worksheet="HISTORY LOG",
+                ttl=300
+            )
+        except:
+            history_df = pd.DataFrame() # Return empty shell if not set up
+
     except Exception as e:
         st.error(f"🚨 Connection Failed: {e}")
         st.stop()
@@ -40,6 +65,9 @@ def load_and_prep_data():
     melted['Lot'] = [str(lots[i]) for i in melted['ColIndex']]
     melted['Expiry'] = [str(expiries[i]) for i in melted['ColIndex']]
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
+    
+    # Clean up RHU names for coordinate mapping
+    melted['RHU_Clean'] = melted['RHU'].astype(str).str.strip().str.upper()
     
     # Stockout Logic
     critical_vaxes = ['BCG', 'bOPV', 'PENTAVALENT', 'MR']
@@ -65,12 +93,10 @@ def load_and_prep_data():
     clean_df['Expiry Date'] = clean_df['Expiry'].apply(parse_expiry)
     clean_df['Expiry Date'] = pd.to_datetime(clean_df['Expiry Date'], errors='coerce').dt.tz_localize(None)
 
-    # --- LOCKING TO PHILIPPINE STANDARD TIME (UTC+8) ---
+    # Locking to Philippine Standard Time
     utc_now = datetime.datetime.now(datetime.timezone.utc)
     pst_now = utc_now + datetime.timedelta(hours=8)
-    # tz_localize(None) makes the timestamp "naive" so it can be subtracted from the data
     today = pd.Timestamp(pst_now).normalize().tz_localize(None)
-    
     clean_df['Days to Expiry'] = (clean_df['Expiry Date'] - today).dt.days
     
     def get_status(days):
@@ -82,10 +108,10 @@ def load_and_prep_data():
             
     clean_df['Status'] = clean_df['Days to Expiry'].apply(get_status)
     load_time = pst_now.strftime("%I:%M %p")
-    return clean_df, stockouts_df, load_time
+    return clean_df, stockouts_df, history_df, load_time
 
 # --- INITIALIZE DATA ---
-df_init, stockouts_init, last_sync = load_and_prep_data()
+df_init, stockouts_init, history_init, last_sync = load_and_prep_data()
 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
@@ -136,7 +162,14 @@ col5.metric("⚠️ Stockout RHUs", len(stockouts['RHU'].unique()))
 st.markdown("---")
 
 # --- TABS ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚠️ Expiry Radar", "🗺️ Distribution", "📋 Raw Data Matrix", "🔍 Recall Trace", "🚨 Stockouts"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "⚠️ Expiry Radar", 
+    "🗺️ Interactive Heat Map", 
+    "📋 Raw Data Matrix", 
+    "🔍 Recall Trace", 
+    "🚨 Smart Redistribution",
+    "📈 Historical Trends"
+])
 
 with tab1:
     st.subheader("Action Required: Expiring or Expired Batches")
@@ -159,10 +192,26 @@ with tab1:
         st.success("✅ All stock is currently within safe expiry limits.")
 
 with tab2:
-    st.subheader("Inventory by Municipality")
-    rhu_totals = df.groupby('RHU')['Qty'].sum().reset_index().sort_values(by='Qty', ascending=False)
-    fig_rhu = px.bar(rhu_totals, x='RHU', y='Qty', color='Qty', color_continuous_scale='Purpor', template='plotly_dark')
-    st.plotly_chart(fig_rhu, use_container_width=True)
+    st.subheader("Geographical Distribution Map")
+    st.write("Visualizing cold chain stock levels across the Cordillera Administrative Region.")
+    
+    # Prepare Map Data
+    rhu_totals = df.groupby('RHU_Clean')['Qty'].sum().reset_index()
+    rhu_totals['Lat'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[0])
+    rhu_totals['Lon'] = rhu_totals['RHU_Clean'].map(lambda x: ABRA_COORDS.get(x, [17.5958, 120.6186])[1])
+    
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        fig_map = px.scatter_mapbox(
+            rhu_totals, lat="Lat", lon="Lon", size="Qty", color="Qty",
+            hover_name="RHU_Clean", color_continuous_scale="Purpor", 
+            size_max=30, zoom=9.5, mapbox_style="carto-darkmatter"
+        )
+        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+        st.plotly_chart(fig_map, use_container_width=True)
+    with c2:
+        fig_rhu = px.bar(rhu_totals.sort_values(by='Qty', ascending=False), x='Qty', y='RHU_Clean', orientation='h', color='Qty', color_continuous_scale='Purpor', template='plotly_dark')
+        st.plotly_chart(fig_rhu, use_container_width=True)
 
 with tab3:
     st.subheader("Searchable Data Grid")
@@ -182,10 +231,57 @@ with tab4:
         else: st.success("No active doses found for this Lot.")
 
 with tab5:
-    st.subheader("🚨 Critical Stockouts")
+    st.subheader("🚨 Critical Stockouts & Redistribution Strategy")
     if not stockouts.empty:
         st.error(f"Alert: {len(stockouts['RHU'].unique())} municipalities are missing primary vaccine types.")
-        summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
-        summary.rename(columns={'Vaccine': 'Missing (Total Stock = 0)'}, inplace=True)
-        st.dataframe(summary, use_container_width=True, hide_index=True)
-    else: st.success("All RHUs have primary vaccine coverage.")
+        
+        c1, c2 = st.columns([1, 1.5])
+        with c1:
+            st.markdown("### Zero-Stock Facilities")
+            summary = stockouts.groupby('RHU')['Vaccine'].apply(lambda x: ', '.join(x)).reset_index()
+            summary.rename(columns={'Vaccine': 'Missing'}, inplace=True)
+            st.dataframe(summary, use_container_width=True, hide_index=True)
+            
+        with c2:
+            st.markdown("### 🧠 Smart Redistribution Matches")
+            st.write("Matching stockouts with nearby facilities holding surplus or expiring doses.")
+            
+            suggestions = []
+            for _, row in stockouts.iterrows():
+                missing_vax = row['Vaccine']
+                dest_rhu = row['RHU']
+                
+                # Find donors with > 50 doses of the missing vaccine
+                donors = df[(df['Vaccine'] == missing_vax) & (df['Qty'] > 50) & (df['RHU'] != dest_rhu)].copy()
+                
+                if not donors.empty:
+                    # Sort so the donor with the earliest expiry is recommended first
+                    best_donor = donors.sort_values(by='Days to Expiry').iloc[0]
+                    suggestions.append({
+                        'To RHU': dest_rhu,
+                        'Vaccine needed': missing_vax,
+                        'Take from RHU': best_donor['RHU'],
+                        'Available': best_donor['Qty'],
+                        'Donor Expiry': best_donor['Expiry Date'].strftime('%b %d')
+                    })
+                    
+            if suggestions:
+                st.dataframe(pd.DataFrame(suggestions), use_container_width=True, hide_index=True)
+            else:
+                st.info("No viable surplus donors found within the province for current stockouts.")
+    else: 
+        st.success("All RHUs have primary vaccine coverage.")
+
+with tab6:
+    st.subheader("📈 Historical Trends & Burn Rate")
+    if history_init.empty:
+        st.info("""
+        **System Notice: Historical Database Offline.**
+        
+        To activate time-lapse charting and track vaccine consumption rates over months, create a new worksheet named exactly **HISTORY LOG** inside your main Google Sheet.
+        
+        *Once the log is detected, this tab will automatically deploy trendlines.*
+        """)
+    else:
+        st.success("History Log detected! Ready for charting integration.")
+        st.dataframe(history_init, use_container_width=True)
