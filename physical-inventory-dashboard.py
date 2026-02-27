@@ -199,7 +199,7 @@ st.markdown("""
     /* --- CUSTOM BACKGROUND IMAGE --- */
     .stApp {
         /* PASTE YOUR COPIED IMAGE LINK INSIDE THE QUOTES BELOW */
-        background-image: url("https://images.unsplash.com/photo-1579684385127-1ef15d508118?q=80&w=2000"); 
+        background-image: url("https://github.com/RJA24/abra-inventory-data--entry/blob/main/Abra_Valley.jpg?raw=true"); 
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
