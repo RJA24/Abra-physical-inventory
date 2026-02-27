@@ -8,15 +8,14 @@ import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
-# --- SILENT ACCESS TRACKER ---
-# This runs invisibly in the background the exact moment someone opens the link
+# --- SILENT ACCESS TRACKER (DEBUG MODE) ---
 if 'has_logged_in' not in st.session_state:
     try:
         tracker_conn = st.connection("gsheets", type=GSheetsConnection)
         access_df = tracker_conn.read(
             spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
             worksheet="ACCESS LOG",
-            ttl=0  # ttl=0 ensures it reads the absolute latest log
+            ttl=0 
         )
         
         pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
@@ -28,15 +27,17 @@ if 'has_logged_in' not in st.session_state:
         if access_df.empty or 'Date' not in access_df.columns:
             updated_log = new_entry
         else:
-            # Add the new visit to the bottom of the list
             updated_log = pd.concat([access_df, new_entry], ignore_index=True)
             
         tracker_conn.update(worksheet="ACCESS LOG", data=updated_log)
-    except:
-        pass # If the tracker fails, it passes silently so it NEVER crashes the main app
+        st.session_state.has_logged_in = True
         
-    # Mark the user as logged in so it doesn't record them again if they click a filter
-    st.session_state.has_logged_in = True
+        # This will flash green on your screen if it works
+        st.success("✅ DEBUG: Tracker successfully wrote to Google Sheets!") 
+        
+    except Exception as e:
+        # This will flash red and tell us exactly why it failed
+        st.error(f"🚨 TRACKER ERROR: {e}")
 
 # --- ABRA GEOSPATIAL DATA ---
 ABRA_COORDS = {
