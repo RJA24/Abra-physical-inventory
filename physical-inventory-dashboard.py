@@ -8,6 +8,36 @@ import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
+# --- SILENT ACCESS TRACKER ---
+# This runs invisibly in the background the exact moment someone opens the link
+if 'has_logged_in' not in st.session_state:
+    try:
+        tracker_conn = st.connection("gsheets", type=GSheetsConnection)
+        access_df = tracker_conn.read(
+            spreadsheet="https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4",
+            worksheet="ACCESS LOG",
+            ttl=0  # ttl=0 ensures it reads the absolute latest log
+        )
+        
+        pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
+        new_entry = pd.DataFrame([{
+            'Date': pst_now.strftime('%Y-%m-%d'), 
+            'Time': pst_now.strftime('%I:%M:%S %p')
+        }])
+        
+        if access_df.empty or 'Date' not in access_df.columns:
+            updated_log = new_entry
+        else:
+            # Add the new visit to the bottom of the list
+            updated_log = pd.concat([access_df, new_entry], ignore_index=True)
+            
+        tracker_conn.update(worksheet="ACCESS LOG", data=updated_log)
+    except:
+        pass # If the tracker fails, it passes silently so it NEVER crashes the main app
+        
+    # Mark the user as logged in so it doesn't record them again if they click a filter
+    st.session_state.has_logged_in = True
+
 # --- ABRA GEOSPATIAL DATA ---
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
@@ -22,6 +52,7 @@ ABRA_COORDS = {
     'VILLAVICIOSA': [17.4333, 120.6333],
     'PHO': [17.5960, 120.6190], 'APH': [17.5940, 120.6180]
 }
+
 def render_footer():
     st.markdown("---")
     st.markdown(
@@ -33,6 +64,7 @@ def render_footer():
         """, 
         unsafe_allow_html=True
     )
+
 # --- SECURE DATA CONNECTION & PARSING ---
 @st.cache_data(ttl=300) 
 def load_and_prep_data():
@@ -509,4 +541,5 @@ with tab6:
         else:
             st.info("Not enough historical data to chart this selection yet.")
 
+# Render custom footer
 render_footer()
