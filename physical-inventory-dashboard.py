@@ -164,7 +164,6 @@ df_init, stockouts_init, history_init, last_sync, melted_init, anomalies_init = 
 # --- SIDEBAR & GLOBAL FILTERS ---
 with st.sidebar:
     # --- ABRA VALLEY BANNER ---
-    # Paste your image URL inside the quotes below!
     st.image("https://github.com/RJA24/abra-inventory-data--entry/blob/main/Abra_Valley.jpg?raw=true", use_container_width=True)
     
     st.title("🏥 Abra PHO")
@@ -174,6 +173,14 @@ with st.sidebar:
     if st.button("🔄 Force Refresh Now"):
         st.cache_data.clear()
         st.rerun()
+        
+    st.markdown("---")
+    st.subheader("Global Filters")
+    global_facility_filter = st.multiselect(
+        "Filter by Health Facility:",
+        options=sorted(df_init['Health Facility'].unique()),
+        help="Filters all charts and tables across the entire dashboard."
+    )
 
 # Apply Global Filter
 df = df_init.copy()
