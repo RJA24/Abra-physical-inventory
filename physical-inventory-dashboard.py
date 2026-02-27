@@ -195,6 +195,25 @@ st.markdown("""
     .main-header { color: #4cc9f0; font-weight: bold; margin-bottom: 0px; }
     .sub-header { color: #a9d6e5; margin-top: 0px; margin-bottom: 20px; font-style: italic; }
     div[data-testid="stMetricValue"] { color: #BC13FE !important; }
+    
+    /* --- CUSTOM BACKGROUND IMAGE --- */
+    .stApp {
+        /* PASTE YOUR COPIED IMAGE LINK INSIDE THE QUOTES BELOW */
+        background-image: url("https://images.unsplash.com/photo-1579684385127-1ef15d508118?q=80&w=2000"); 
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+    }
+    
+    /* --- DARK OVERLAY --- */
+    /* This acts like a tinted window over your image so the neon text is still easy to read */
+    .stApp::before {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(14, 17, 23, 0.85); /* 85% dark fade */
+        z-index: -1;
+    }
     </style>
 """, unsafe_allow_html=True)
 
