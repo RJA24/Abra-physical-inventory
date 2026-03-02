@@ -493,8 +493,22 @@ with tab4:
         res = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
         if not res.empty:
             st.warning(f"Found {res['Qty'].sum()} vials of Lot {search_lot}")
-            st.dataframe(res[['Health Facility', 'Vaccine', 'Qty', 'Status']], use_container_width=True, hide_index=True)
-        else: st.success("No active vials found for this Lot.")
+            
+            # Display DataFrame
+            display_cols = ['Health Facility', 'Vaccine', 'Qty', 'Status']
+            st.dataframe(res[display_cols], use_container_width=True, hide_index=True)
+            
+            # CSV Export Button for Recall
+            csv_recall = res[display_cols].to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"📥 Download Recall Data for Lot {search_lot} (CSV)",
+                data=csv_recall,
+                file_name=f"recall_trace_lot_{search_lot}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else: 
+            st.success("No active vials found for this Lot.")
 
 with tab5:
     st.subheader("🚨 Stockouts & Redistribution Strategy")
@@ -508,12 +522,23 @@ with tab5:
             summary.rename(columns={'Vaccine': 'Missing'}, inplace=True)
             st.dataframe(summary, use_container_width=True, hide_index=True)
             
+            # CSV Export Button for Stockouts
+            csv_stockouts = summary.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Stockout List (CSV)",
+                data=csv_stockouts,
+                file_name="zero_stock_facilities.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
         with c2:
             st.markdown("### 🧠 Smart Redistribution Matches")
             suggestions = []
             for _, row in stockouts.iterrows():
                 missing_vax = row['Vaccine']
                 dest_facility = row['Health Facility']
+                # Find donors with more than 50 vials
                 donors = df[(df['Vaccine'] == missing_vax) & (df['Qty'] > 50) & (df['Health Facility'] != dest_facility)].copy()
                 
                 if not donors.empty:
@@ -527,12 +552,22 @@ with tab5:
                     })
                     
             if suggestions:
-                st.dataframe(pd.DataFrame(suggestions), use_container_width=True, hide_index=True)
+                sugg_df = pd.DataFrame(suggestions)
+                st.dataframe(sugg_df, use_container_width=True, hide_index=True)
+                
+                # CSV Export Button for Redistribution Plan
+                csv_sugg = sugg_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Redistribution Plan (CSV)",
+                    data=csv_sugg,
+                    file_name="redistribution_plan.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
             else:
                 st.info("No viable surplus donors found within the province for current stockouts.")
     else: 
         st.success("All Facilities are fully stocked across all vaccines.")
-
 with tab6:
     st.subheader("📈 Historical Trends & AI Burn Rate")
     st.write("The system archives a snapshot every 7 days to calculate provincial burn rates and forecast future stockouts.")
