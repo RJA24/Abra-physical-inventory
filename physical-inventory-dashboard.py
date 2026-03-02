@@ -611,8 +611,12 @@ with tab6:
                 
             st.plotly_chart(fig_trend, use_container_width=True)
             
-            # --- NEW: PREDICTIVE FORECASTER AI ---
+            # --- NEW: PREDICTIVE FORECASTER AI WITH EXPORT ---
             st.markdown("### 🤖 Predictive Stockout Forecaster")
+            
+            # List to hold the AI predictions for the CSV export
+            forecast_data = []
+            
             for facility in hist_facility:
                 fac_name = "PROVINCIAL TOTAL" if facility == "ALL FACILITIES (Provincial Total)" else facility
                 fac_df = plot_df[plot_df['Health Facility'] == fac_name].sort_values('Date')
@@ -631,17 +635,80 @@ with tab6:
                             days_left = int(current_stock / daily_burn)
                             est_zero_date = last_record['Date'] + datetime.timedelta(days=days_left)
                             st.info(f"**{fac_name}:** Burning ~{daily_burn:.1f} vials/day. Estimated stockout in **{days_left} days** ({est_zero_date.strftime('%b %d, %Y')}).")
+                            
+                            forecast_data.append({
+                                'Health Facility': fac_name,
+                                'Vaccine': hist_vax,
+                                'Current Stock': current_stock,
+                                'Daily Burn Rate': round(daily_burn, 1),
+                                'Days Until Stockout': days_left,
+                                'Estimated Stockout Date': est_zero_date.strftime('%Y-%m-%d'),
+                                'Status': 'Burning Stock'
+                            })
                         else:
                             st.error(f"**{fac_name}:** Currently out of stock.")
+                            
+                            forecast_data.append({
+                                'Health Facility': fac_name,
+                                'Vaccine': hist_vax,
+                                'Current Stock': 0,
+                                'Daily Burn Rate': round(daily_burn, 1),
+                                'Days Until Stockout': 0,
+                                'Estimated Stockout Date': 'OUT OF STOCK',
+                                'Status': 'Stockout'
+                            })
                     elif qty_diff < 0:
                         st.success(f"**{fac_name}:** Stock levels have recently increased (Restocked).")
+                        
+                        forecast_data.append({
+                            'Health Facility': fac_name,
+                            'Vaccine': hist_vax,
+                            'Current Stock': current_stock,
+                            'Daily Burn Rate': 'N/A',
+                            'Days Until Stockout': 'N/A',
+                            'Estimated Stockout Date': 'N/A',
+                            'Status': 'Restocked/Increasing'
+                        })
                     else:
                         st.write(f"**{fac_name}:** No vials consumed in the tracked period.")
+                        
+                        forecast_data.append({
+                            'Health Facility': fac_name,
+                            'Vaccine': hist_vax,
+                            'Current Stock': current_stock,
+                            'Daily Burn Rate': 0,
+                            'Days Until Stockout': 'N/A',
+                            'Estimated Stockout Date': 'N/A',
+                            'Status': 'Stagnant (No Consumption)'
+                        })
                 else:
                     st.write(f"**{fac_name}:** Not enough history generated yet to forecast (requires at least 7 days).")
+                    
+                    forecast_data.append({
+                        'Health Facility': fac_name,
+                        'Vaccine': hist_vax,
+                        'Current Stock': fac_df.iloc[-1]['Qty'] if not fac_df.empty else 0,
+                        'Daily Burn Rate': 'Insufficient Data',
+                        'Days Until Stockout': 'Insufficient Data',
+                        'Estimated Stockout Date': 'Insufficient Data',
+                        'Status': 'Not Enough History'
+                    })
             
+            # Render the export button if we have data
+            if forecast_data:
+                forecast_df = pd.DataFrame(forecast_data)
+                csv_forecast = forecast_df.to_csv(index=False).encode('utf-8')
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.download_button(
+                    label=f"📥 Download AI Forecast Report for {hist_vax} (CSV)",
+                    data=csv_forecast,
+                    file_name=f"stockout_forecast_{hist_vax.replace(' ', '_')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
         else:
             st.info("Not enough historical data to chart this selection yet.")
-
 # Render custom footer
 render_footer()
