@@ -432,10 +432,48 @@ with tab2:
 
 with tab3:
     st.subheader("Searchable Data Grid")
+    
+    # Global Tab Filter
     vax_filter = st.multiselect("Filter by Vaccine Type:", options=sorted(df['Vaccine'].unique()))
     grid_view = df.copy()
-    if vax_filter: grid_view = grid_view[grid_view['Vaccine'].isin(vax_filter)]
-    st.dataframe(grid_view[['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], use_container_width=True, hide_index=True)
+    if vax_filter: 
+        grid_view = grid_view[grid_view['Vaccine'].isin(vax_filter)]
+    
+    # Table 1: Detailed View
+    st.markdown("**Detailed Inventory (with Lots & Expiry)**")
+    st.dataframe(
+        grid_view[['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], 
+        use_container_width=True, 
+        hide_index=True
+    )
+    
+    st.markdown("---")
+    
+    # Table 2: Aggregated Clean View
+    st.subheader("Aggregated Stock Totals")
+    st.write("Total remaining vials per facility, grouped by vaccine type (ignores lot and expiry).")
+    
+    # Group by Facility and Vaccine, sum the Qty
+    agg_df = grid_view.groupby(['Health Facility', 'Vaccine'])['Qty'].sum().reset_index()
+    
+    # Filter to only show actual remaining stock (> 0)
+    agg_df = agg_df[agg_df['Qty'] > 0]
+    
+    st.dataframe(
+        agg_df, 
+        use_container_width=True, 
+        hide_index=True
+    )
+    
+    # CSV Export Button for Aggregated Data
+    csv_agg = agg_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Aggregated Totals (CSV)",
+        data=csv_agg,
+        file_name="aggregated_vaccine_totals.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
 
 with tab4:
     st.subheader("🔍 Product Recall Trace")
