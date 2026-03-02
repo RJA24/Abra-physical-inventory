@@ -8,40 +8,54 @@ import datetime
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Abra PHO | Vaccine Inventory", layout="wide", page_icon="💉")
 
-# --- SILENT ACCESS TRACKER ---
-# This runs invisibly in the background the exact moment someone opens the link
+# --- SILENT ACCESS TRACKER (PATCHED) ---
+# This runs invisibly but now filters out server health-checks and bots
 if 'has_logged_in' not in st.session_state:
     try:
-        tracker_conn = st.connection("gsheets", type=GSheetsConnection)
-        SHEET_URL = "https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4"
-        
-        access_df = tracker_conn.read(
-            spreadsheet=SHEET_URL,
-            worksheet="ACCESS LOG",
-            ttl=0 
-        )
-        
-        pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
-        new_entry = pd.DataFrame([{
-            'Date': pst_now.strftime('%Y-%m-%d'), 
-            'Time': pst_now.strftime('%I:%M:%S %p')
-        }])
-        
-        if access_df.empty or 'Date' not in access_df.columns:
-            updated_log = new_entry
-        else:
-            updated_log = pd.concat([access_df, new_entry], ignore_index=True)
+        # Attempt to read the visitor's browser ID (User-Agent)
+        try:
+            user_agent = st.context.headers.get("User-Agent", "").lower()
+        except:
+            user_agent = "unknown"
+
+        # Check if it's a known bot, health check, or empty server ping
+        is_bot = any(keyword in user_agent for keyword in ["bot", "health", "uptime", "curl", "googlehc", "python-requests"]) or user_agent == ""
+
+        if not is_bot:
+            tracker_conn = st.connection("gsheets", type=GSheetsConnection)
+            SHEET_URL = "https://docs.google.com/spreadsheets/d/1CYarF3POk_UYyXxff2jj-k803nfBA8nhghQ-9OAz0Y4"
             
-        tracker_conn.update(
-            spreadsheet=SHEET_URL,
-            worksheet="ACCESS LOG", 
-            data=updated_log
-        )
+            access_df = tracker_conn.read(
+                spreadsheet=SHEET_URL,
+                worksheet="ACCESS LOG",
+                ttl=0 
+            )
+            
+            pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
+            new_entry = pd.DataFrame([{
+                'Date': pst_now.strftime('%Y-%m-%d'), 
+                'Time': pst_now.strftime('%I:%M:%S %p'),
+                'Device': 'Human' # Flag to confirm the filter worked
+            }])
+            
+            if access_df.empty or 'Date' not in access_df.columns:
+                updated_log = new_entry
+            else:
+                updated_log = pd.concat([access_df, new_entry], ignore_index=True)
+                
+            tracker_conn.update(
+                spreadsheet=SHEET_URL,
+                worksheet="ACCESS LOG", 
+                data=updated_log
+            )
+            
+        # Set this to True even for bots, so it stops checking repeatedly
         st.session_state.has_logged_in = True
         
-    except:
-        # Fails silently so it NEVER crashes the main app for your users
+    except Exception as e:
+        # Fails silently so it NEVER crashes the main app
         pass
+
 # --- ABRA GEOSPATIAL DATA ---
 ABRA_COORDS = {
     'BANGUED': [17.5958, 120.6186], 'BOLINEY': [17.3917, 120.8167], 'BUCAY': [17.5333, 120.7333],
@@ -424,7 +438,7 @@ with tab3:
     st.dataframe(grid_view[['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], use_container_width=True, hide_index=True)
 
 with tab4:
-    st.subheader("🔍 Product Recall Search")
+    st.subheader("🔍 Product Recall Trace")
     search_lot = st.text_input("Enter Lot Number (e.g., 12854X007B):")
     if search_lot:
         res = df[df['Lot'].str.contains(search_lot, case=False, na=False)]
