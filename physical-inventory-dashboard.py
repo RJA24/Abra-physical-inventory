@@ -235,6 +235,20 @@ with st.sidebar:
         st.rerun()
         
     st.markdown("---")
+    st.subheader("🎨 Visual Theme")
+    theme_choice = st.radio("Chart & Map Aesthetic:", ["Dark Mode", "Light Mode"], horizontal=True)
+    
+    # Dynamic Theme Variables
+    is_dark = theme_choice == "Dark Mode"
+    chart_template = "plotly_dark" if is_dark else "plotly_white"
+    map_theme = "carto-darkmatter" if is_dark else "carto-positron"
+    
+    st.markdown(
+        "<small style='color:gray'>Note: Change the master app background via the top-right menu (⋮) -> Settings -> Theme.</small>", 
+        unsafe_allow_html=True
+    )
+    
+    st.markdown("---")
     st.subheader("Global Filters")
     global_facility_filter = st.multiselect(
         "Filter by Health Facility:",
@@ -252,12 +266,15 @@ if global_facility_filter:
     stockouts = stockouts[stockouts['Health Facility'].isin(global_facility_filter)]
     melted_df = melted_df[melted_df['Health Facility'].isin(global_facility_filter)]
 
-# --- CSS STYLING ---
-st.markdown("""
+# --- DYNAMIC CSS STYLING ---
+header_color = "#4cc9f0" if is_dark else "#0077b6"
+sub_color = "#a9d6e5" if is_dark else "#023e8a"
+
+st.markdown(f"""
     <style>
-    .main-header { color: #4cc9f0; font-weight: bold; margin-bottom: 0px; }
-    .sub-header { color: #a9d6e5; margin-top: 0px; margin-bottom: 20px; font-style: italic; }
-    div[data-testid="stMetricValue"] { color: #BC13FE !important; }
+    .main-header {{ color: {header_color}; font-weight: bold; margin-bottom: 0px; }}
+    .sub-header {{ color: {sub_color}; margin-top: 0px; margin-bottom: 20px; font-style: italic; }}
+    div[data-testid="stMetricValue"] {{ color: #BC13FE !important; }}
     </style>
 """, unsafe_allow_html=True)
 
@@ -315,7 +332,7 @@ with tab1:
         with c1:
             fig_status = px.bar(urgent_df['Status'].value_counts().reset_index(), y='Status', x='count', 
                                color='Status', color_discrete_map={'🚨 EXPIRED': '#ff4b4b', '🔴 CRITICAL (< 2 Mos)': '#ff8c00', '🟡 WARNING (2-4 Mos)': '#ffd700'},
-                               template='plotly_dark', height=250, orientation='h', title="Flagged Batches by Urgency")
+                               template=chart_template, height=250, orientation='h', title="Flagged Batches by Urgency")
             fig_status.update_layout(showlegend=False, xaxis_title="Number of Batches", yaxis_title="")
             st.plotly_chart(fig_status, use_container_width=True)
             
@@ -410,7 +427,7 @@ with tab2:
                     "⚠️ At Risk (<60d Expiry)": "#ffd700", 
                     "🟢 Healthy Stock": "#00cc66"
                 },
-                size_max=25, zoom=9.2, mapbox_style="carto-darkmatter"
+                size_max=25, zoom=9.2, mapbox_style=map_theme
             )
             fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
             st.plotly_chart(fig_map, use_container_width=True)
@@ -424,7 +441,7 @@ with tab2:
                     "⚠️ At Risk (<60d Expiry)": "#ffd700", 
                     "🟢 Healthy Stock": "#00cc66"
                 }, 
-                template='plotly_dark'
+                template=chart_template
             )
             st.plotly_chart(fig_facility, use_container_width=True)
     else:
@@ -486,6 +503,7 @@ with tab3:
         mime="text/csv",
         use_container_width=True
     )
+
 with tab4:
     st.subheader("🔍 Product Recall Trace")
     search_lot = st.text_input("Enter Lot Number (e.g., 12854X007B):")
@@ -568,6 +586,7 @@ with tab5:
                 st.info("No viable surplus donors found within the province for current stockouts.")
     else: 
         st.success("All Facilities are fully stocked across all vaccines.")
+
 with tab6:
     st.subheader("📈 Historical Trends & AI Burn Rate")
     st.write("The system archives a snapshot every 7 days to calculate provincial burn rates and forecast future stockouts.")
@@ -602,7 +621,7 @@ with tab6:
         
         if not plot_df.empty:
             fig_trend = px.line(plot_df, x='Date', y='Qty', color='Health Facility', markers=True, text='Qty',
-                                title=f"{hist_vax} Stock Trend Over Time (Vials)", template='plotly_dark')
+                                title=f"{hist_vax} Stock Trend Over Time (Vials)", template=chart_template)
             
             fig_trend.update_traces(textposition="top center")
             
@@ -710,5 +729,6 @@ with tab6:
                 
         else:
             st.info("Not enough historical data to chart this selection yet.")
+
 # Render custom footer
 render_footer()
