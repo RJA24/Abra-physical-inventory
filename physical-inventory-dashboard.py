@@ -439,17 +439,29 @@ with tab3:
     if vax_filter: 
         grid_view = grid_view[grid_view['Vaccine'].isin(vax_filter)]
     
-    # Table 1: Detailed View
+    # --- TABLE 1: DETAILED VIEW ---
     st.markdown("**Detailed Inventory (with Lots & Expiry)**")
+    
+    detailed_columns = ['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']
     st.dataframe(
-        grid_view[['Health Facility', 'Vaccine', 'Lot', 'Expiry', 'Qty', 'Status']], 
+        grid_view[detailed_columns], 
         use_container_width=True, 
         hide_index=True
     )
     
+    # CSV Export Button for Detailed Data
+    csv_detailed = grid_view[detailed_columns].to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download Detailed Inventory (CSV)",
+        data=csv_detailed,
+        file_name="detailed_vaccine_inventory.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+    
     st.markdown("---")
     
-    # Table 2: Aggregated Clean View
+    # --- TABLE 2: AGGREGATED VIEW ---
     st.subheader("Aggregated Stock Totals")
     st.write("Total remaining vials per facility, grouped by vaccine type (ignores lot and expiry).")
     
@@ -474,7 +486,6 @@ with tab3:
         mime="text/csv",
         use_container_width=True
     )
-
 with tab4:
     st.subheader("🔍 Product Recall Trace")
     search_lot = st.text_input("Enter Lot Number (e.g., 12854X007B):")
