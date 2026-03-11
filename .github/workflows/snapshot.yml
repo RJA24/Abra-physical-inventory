@@ -2,9 +2,8 @@ name: Weekly Inventory Snapshot
 
 on:
   schedule:
-    # Runs at 16:00 UTC every Thursday (Midnight Friday Philippine Time)
-    # This guarantees exactly 7 days between the March 6th snapshot and the March 13th snapshot.
-    - cron: '0 16 * * 4'
+    # Runs at 15:59 UTC every Friday (11:59 PM Friday Philippine Time)
+    - cron: '59 15 * * 5'
   workflow_dispatch: # Adds a button in GitHub to run it manually if you ever want to test it
 
 jobs:
