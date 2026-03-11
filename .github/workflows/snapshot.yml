@@ -1,0 +1,33 @@
+name: Weekly Inventory Snapshot
+
+on:
+  schedule:
+    # Runs at 16:00 UTC every Thursday (Midnight Friday Philippine Time)
+    # This guarantees exactly 7 days between the March 6th snapshot and the March 13th snapshot.
+    - cron: '0 16 * * 4'
+  workflow_dispatch: # Adds a button in GitHub to run it manually if you ever want to test it
+
+jobs:
+  take-snapshot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9' # Matches typical Streamlit environments
+
+      - name: Install dependencies
+        run: |
+          pip install pandas streamlit st-gsheets-connection
+
+      - name: Setup Streamlit Secrets
+        run: |
+          mkdir -p .streamlit
+          echo '${{ secrets.GCP_CREDENTIALS }}' > .streamlit/secrets.toml
+
+      - name: Run Snapshot Script
+        run: python take_snapshot.py
