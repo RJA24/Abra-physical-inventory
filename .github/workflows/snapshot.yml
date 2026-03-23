@@ -1,0 +1,35 @@
+name: Weekly Inventory Snapshot
+
+on:
+  schedule:
+    # This cron runs at 00:00 UTC every Friday (which is 8:00 AM Philippine Time)
+    - cron: '0 0 * * 5'
+  # This line adds a "Run workflow" button so you can test it manually anytime!
+  workflow_dispatch: 
+
+jobs:
+  take-snapshot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas gspread toml
+
+    - name: Inject Secrets securely
+      run: |
+        mkdir -p .streamlit
+        echo "${{ secrets.GCP_SECRETS_TOML }}" > .streamlit/secrets.toml
+
+    - name: Run snapshot script
+      # Using --force bypasses your script's Friday-only check just in case you run it manually on another day
+      run: python take_snapshot.py --force
