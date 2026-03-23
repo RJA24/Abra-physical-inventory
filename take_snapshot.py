@@ -13,7 +13,7 @@ if pst_now.weekday() != 4:
 print("Waking up! Starting snapshot process...")
 
 # --- 2. AUTHENTICATION ---
-SECRETS_PATH = "/home/JangTV/AbraInventory/.streamlit/secrets.toml"
+SECRETS_PATH = ".streamlit/secrets.toml"
 with open(SECRETS_PATH, "r") as f:
     secrets = toml.load(f)
 
