@@ -131,6 +131,10 @@ def load_and_prep_data():
     
     melted['Facility_Clean'] = melted['Health Facility'].astype(str).str.strip().str.upper()
 
+    # Re-add time variables needed for Expiry and Load Time logic
+    pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
+    today_date = pd.Timestamp(pst_now).normalize().tz_localize(None)
+
     # Stockout Logic (All Vaccines)
     facility_vax_totals = melted.groupby(['Health Facility', 'Facility_Clean', 'Vaccine'])['Qty'].sum().reset_index()
     stockouts_df = facility_vax_totals[facility_vax_totals['Qty'] == 0].copy()
