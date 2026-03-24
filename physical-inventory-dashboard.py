@@ -130,39 +130,6 @@ def load_and_prep_data():
     melted['Qty'] = pd.to_numeric(melted['Qty'], errors='coerce').fillna(0).astype(int)
     
     melted['Facility_Clean'] = melted['Health Facility'].astype(str).str.strip().str.upper()
-    
-    # --- AUTOMATED 7-DAY HISTORICAL SNAPSHOT LOGIC ---
-    if history_df.empty or 'Date' not in history_df.columns:
-        history_df = pd.DataFrame(columns=['Date', 'Health Facility', 'Vaccine', 'Qty'])
-
-    history_df['Date_Temp'] = pd.to_datetime(history_df['Date'], errors='coerce')
-    last_snapshot_date = history_df['Date_Temp'].max()
-
-    pst_now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)
-    today_date = pd.Timestamp(pst_now).normalize().tz_localize(None)
-
-    needs_update = False
-    if pd.isna(last_snapshot_date):
-        needs_update = True
-    elif (today_date - last_snapshot_date).days >= 7:
-        needs_update = True
-
-    if needs_update:
-        snap_df = melted.groupby(['Health Facility', 'Vaccine'])['Qty'].sum().reset_index()
-        snap_df.insert(0, 'Date', pst_now.strftime('%Y-%m-%d'))
-
-        history_df = history_df.drop(columns=['Date_Temp'])
-        updated_history = pd.concat([history_df, snap_df], ignore_index=True)
-
-        try:
-            conn.update(worksheet="HISTORY LOG", data=updated_history)
-            history_df = updated_history
-        except Exception as e:
-            print(f"Robot failed to write to History Log: {e}")
-    else:
-        history_df = history_df.drop(columns=['Date_Temp'])
-        
-    # --- END AUTOMATED SNAPSHOT ---
 
     # Stockout Logic (All Vaccines)
     facility_vax_totals = melted.groupby(['Health Facility', 'Facility_Clean', 'Vaccine'])['Qty'].sum().reset_index()
